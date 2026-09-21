@@ -1,0 +1,30 @@
+{
+  "name": "Gestión General de Service — ENSA",
+  "short_name": "Service ENSA",
+  "description": "Registro de service, giras, repuestos, cobranza y encuestas de la postventa de ENSA.",
+  "lang": "es-AR",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#f4f6f8",
+  "theme_color": "#090f13",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "icono-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icono-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icono-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Registro de Service", "short_name": "Registro", "url": "./?ir=trabajos",
+      "icons": [{ "src": "icono-192.png", "sizes": "192x192" }] },
+    { "name": "Gira / Hoja de ruta", "short_name": "Gira", "url": "./?ir=giras",
+      "icons": [{ "src": "icono-192.png", "sizes": "192x192" }] },
+    { "name": "Cobranza", "short_name": "Cobranza", "url": "./?ir=cobranza",
+      "icons": [{ "src": "icono-192.png", "sizes": "192x192" }] },
+    { "name": "Encuestas", "short_name": "Encuestas", "url": "./?ir=encuestas",
+      "icons": [{ "src": "icono-192.png", "sizes": "192x192" }] }
+  ]
+}
