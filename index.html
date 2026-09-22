@@ -695,6 +695,11 @@ table.planilla th{font-size:10px;padding:5px 5px;white-space:normal;cursor:defau
 table.planilla td{padding:4px 5px;white-space:normal;max-width:none;vertical-align:top}
 table.planilla td.largo{min-width:230px}
 table.planilla b.monto{font-weight:800}
+/* La franja clara entre un trabajo y el siguiente (fila par) ya la pone
+   table.grilla para toda tabla; en el papel el navegador descarta los
+   fondos de color salvo que se le pida explícitamente, así que sin esto
+   la planilla impresa se ve como una sola raya de renglones pegados. */
+table.planilla tbody tr:nth-child(even){-webkit-print-color-adjust:exact;print-color-adjust:exact}
 /* Cliente, Ciudad y Provincia van con un fondo apenas distinto para
    ubicarlos de un vistazo entre las demás columnas. */
 table.planilla th.col-destacada,table.planilla td.col-destacada{
@@ -702,6 +707,13 @@ table.planilla th.col-destacada,table.planilla td.col-destacada{
 /* la alerta de "recién instalado" es más urgente: si coinciden en la misma
    fila, gana el color de alerta por sobre el resaltado de columna */
 table.planilla tr.recien-instalado td.col-destacada{background:#fde3e0}
+/* Al cambiar de día dentro de una misma tabla ("Todo junto", o separando
+   por técnico, que puede mezclar días de la semana) el primer trabajo del
+   día nuevo lleva una raya más marcada arriba: mismo recurso que ya separa
+   una semana de la siguiente en Registro de Service. Va antes que la regla
+   de "recién instalado" en print (más abajo) para que, si coinciden en la
+   misma fila, gane el color de alerta por sobre esta raya. */
+table.planilla tr.otro-dia td{border-top:1.5px solid var(--texto)}
 /* Letterhead que se repite en cada hoja física al imprimir: vive adentro del
    <thead> de la tabla (por eso el navegador la reimprime sola en cada salto
    de página, igual que los títulos de columna) y por eso en pantalla no
@@ -802,7 +814,13 @@ html.modo-papel .contenido{overflow:visible}
   body.imprimiendo .fondo{position:static;background:none;padding:0;display:block;overflow:visible}
   /* si la hoja se abrió desde una ficha o una ventana, esas no se imprimen */
   body.imprimiendo .ficha,body.imprimiendo .modal{display:none!important}
-  body.imprimiendo .hoja-impresion{max-width:none!important;box-shadow:none;border:0}
+  /* Marco externo de la hoja impresa: "overflow:visible" a propósito, para
+     que si algo llegara a no entrar en el ancho calculado, lo que se corte
+     en el borde de la hoja sea este marco y nunca el contenido de la
+     tabla (que además ya tiene su propio resguardo: anchosPlanilla() achica
+     las columnas de texto largo antes de que eso pueda pasar). */
+  body.imprimiendo .hoja-impresion{max-width:none!important;box-shadow:none;
+    border:1.5px solid var(--texto);overflow:visible}
   body.imprimiendo .panel-cuerpo{padding:0}
   /* la planilla entra completa en el ancho de la hoja, con letra 12 */
   body.imprimiendo .tabla-caja{border:0}
@@ -4637,8 +4655,15 @@ function HojaRuta({ gira, paradas, alCerrar }) {
     return 1072 - m.reduce((a, x) => a + x.minimo, 0);
   }, [paradas, tam]);
 
-  const filas = lista => lista.map(t => html`<tr key=${t.id}
-      class=${recienInstalado(t) ? 'recien-instalado' : ''}>
+  /* Cuando en una misma tabla conviven trabajos de más de un día ("Todo
+     junto", o separando por técnico, que puede mezclar días de la semana),
+     el primero de cada día nuevo lleva una raya más marcada arriba: el
+     mismo recurso que ya separa una semana de la siguiente en Registro de
+     Service, sin agregar ningún rótulo (la columna VISITA ya dice el día). */
+  const filas = lista => lista.map((t, i) => html`<tr key=${t.id}
+      class=${[recienInstalado(t) ? 'recien-instalado' : '',
+               i > 0 && (t.fecha_visita || '') !== (lista[i - 1].fecha_visita || '') ? 'otro-dia' : ''
+              ].filter(Boolean).join(' ')}>
     ${COLS_HOJA.map(([rot, val, , , corta]) => html`<td class=${[corta || '',
         rot === 'OBSERVACIONES' ? 'largo' : '',
         COLS_DESTACADAS.has(rot) ? 'col-destacada' : '',
