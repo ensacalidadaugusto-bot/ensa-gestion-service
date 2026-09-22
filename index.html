@@ -695,6 +695,24 @@ table.planilla th{font-size:10px;padding:5px 5px;white-space:normal;cursor:defau
 table.planilla td{padding:4px 5px;white-space:normal;max-width:none;vertical-align:top}
 table.planilla td.largo{min-width:230px}
 table.planilla b.monto{font-weight:800}
+/* Cliente, Ciudad y Provincia van con un fondo apenas distinto para
+   ubicarlos de un vistazo entre las demás columnas. */
+table.planilla th.col-destacada,table.planilla td.col-destacada{
+  background:var(--azul-claro);-webkit-print-color-adjust:exact;print-color-adjust:exact}
+/* la alerta de "recién instalado" es más urgente: si coinciden en la misma
+   fila, gana el color de alerta por sobre el resaltado de columna */
+table.planilla tr.recien-instalado td.col-destacada{background:#fde3e0}
+/* Letterhead que se repite en cada hoja física al imprimir: vive adentro del
+   <thead> de la tabla (por eso el navegador la reimprime sola en cada salto
+   de página, igual que los títulos de columna) y por eso en pantalla no
+   hace falta verla dos veces. */
+table.planilla tr.fila-titulo-planilla{display:none}
+table.planilla tr.fila-titulo-planilla > th{padding:0;border:0;background:none;position:static}
+@media print{
+  table.planilla tr.fila-titulo-planilla{display:table-row}
+  table.planilla tr.fila-titulo-planilla > th{padding:0 0 8px}
+  table.planilla tr.fila-titulo-planilla .encabezado-hoja{margin-bottom:0}
+}
 .pie-hoja{display:flex;gap:34px;margin-top:14px;padding-top:8px;border-top:1px solid var(--borde)}
 
 /* =====================================================================
@@ -3880,13 +3898,26 @@ function NuevoCliente({ inicial, alCerrar, alCrear }) {
 function NuevoEquipo({ inicial, clienteId, alCerrar, alCrear }) {
   const s = useS();
   const [b, setB] = useState({ n_serie: inicial || '', modelo: '', n_paradas: '', motorizacion: '',
-                               puerta: '', fecha_instalacion: '', cliente_id: clienteId || null });
+                               puerta: '', fecha_instalacion: '', cliente_id: clienteId || null,
+                               ciudad: '', provincia: '', direccion: '' });
   const [yendo, setYendo] = useState(false);
   const [creandoCliente, setCreandoCliente] = useState(false);
   const c = (k, v) => setB(x => ({ ...x, [k]: v }));
   const serie = (b.n_serie || '').trim();
   const repetido = S.equipos.find(e => sinAcentos(e.n_serie) === sinAcentos(serie));
   const cli = s.clientes.find(x => String(x.id) === String(b.cliente_id));
+
+  /* Al elegir el cliente se completa la dirección del equipo SÓLO si todavía
+     está vacía: es un punto de partida para no volver a tipear cuando es el
+     único equipo de ese cliente, pero cada equipo tiene su propia dirección
+     de instalación (un mismo cliente puede tener varios, en puntos
+     distintos) y siempre se puede corregir acá antes de guardar. */
+  const elegirCliente = x => setB(y => ({
+    ...y, cliente_id: x ? x.id : null,
+    ciudad: y.ciudad || (x && x.ciudad) || '',
+    provincia: y.provincia || (x && x.provincia) || '',
+    direccion: y.direccion || (x && x.direccion) || '',
+  }));
 
   async function guardar() {
     setYendo(true);
@@ -3897,6 +3928,9 @@ function NuevoEquipo({ inicial, clienteId, alCerrar, alCrear }) {
       puerta: (b.puerta || '').trim() || null,
       fecha_instalacion: b.fecha_instalacion || null,
       cliente_id: b.cliente_id || null,
+      ciudad: (b.ciudad || '').trim() || null,
+      provincia: (b.provincia || '').trim() || null,
+      direccion: (b.direccion || '').trim() || null,
     };
     const { data, error } = await cliente().from('equipos').insert(cuerpo).select('*').single();
     setYendo(false);
@@ -3915,11 +3949,14 @@ function NuevoEquipo({ inicial, clienteId, alCerrar, alCrear }) {
     </div>`}
     <${Autocompletar} rot="Cliente del equipo" valor=${cli} lista=${s.clientes}
       textoDe=${x => `${x.nombre}${x.ciudad ? ' — ' + x.ciudad : ''}`}
-      alElegir=${x => c('cliente_id', x ? x.id : null)} placeholder="Buscar cliente…" />
+      alElegir=${elegirCliente} placeholder="Buscar cliente…" />
     <div class="fila mini" style="margin:-4px 0 6px">
       <span>¿Es un cliente nuevo?</span>
       <button class="btn sec chico" onClick=${() => setCreandoCliente(true)}>+ Cliente nuevo</button>
     </div>
+    <div class="mini" style="margin-bottom:2px">El cliente es el dato de contacto y facturación.
+      Cada equipo (cada número de serie) tiene su propia dirección de instalación, aunque
+      pertenezca al mismo cliente que otros equipos en puntos distintos: se carga abajo.</div>
     <div class="rejilla">
       <${Sel} rot="Modelo" valor=${b.modelo} opts=${opciones('modelo')}
         alCambiar=${v => c('modelo', v)} />
@@ -3934,8 +3971,14 @@ function NuevoEquipo({ inicial, clienteId, alCerrar, alCrear }) {
     </div>
     <${Txt} rot="Fecha de instalación" tipo="date" valor=${b.fecha_instalacion}
       alCambiar=${v => c('fecha_instalacion', v)} />
-    <div class="mini">La fecha de instalación es la que usa el sistema para marcar en rojo los
-      trabajos de equipos con menos de un mes.</div>
+    <div class="mini" style="margin-bottom:8px">La fecha de instalación es la que usa el sistema
+      para marcar en rojo los trabajos de equipos con menos de un mes.</div>
+    <div class="rejilla">
+      <${Txt} rot="Ciudad de instalación" valor=${b.ciudad} alCambiar=${v => c('ciudad', v)} />
+      <${Sel} rot="Provincia de instalación" valor=${b.provincia} opts=${opciones('provincia')}
+        alCambiar=${v => c('provincia', v)} />
+    </div>
+    <${Txt} rot="Dirección de instalación" valor=${b.direccion} alCambiar=${v => c('direccion', v)} />
     <div class="fila" style="justify-content:flex-end;margin-top:4px">
       <button class="btn sec" onClick=${alCerrar}>Cancelar</button>
       <button class="btn" disabled=${!serie || !!repetido || yendo} onClick=${guardar}>
@@ -4465,6 +4508,9 @@ const COLS_HOJA = [
   ['VISITA',               t => diaSemana(t.fecha_visita), 58,  4.6, 'corta'],
   ['OBSERVACIONES',        t => t.obs_servicio,            250, 14.6],
 ];
+/* Cliente, Ciudad y Provincia son lo primero que hay que ubicar de un
+   vistazo en la hoja: van con la columna pintada levemente. */
+const COLS_DESTACADAS = new Set(['Cliente', 'Ciudad', 'Provincia']);
 /* El monto que aparezca en las observaciones se imprime más grande y en negrita */
 const RE_MONTO = /((?:U\$D|US\$|\$)\s?\d[\d.,]*|\b\d{1,3}(?:\.\d{3})+(?:,\d+)?\b)/g;
 function resaltarMontos(txt, tam) {
@@ -4595,11 +4641,35 @@ function HojaRuta({ gira, paradas, alCerrar }) {
       class=${recienInstalado(t) ? 'recien-instalado' : ''}>
     ${COLS_HOJA.map(([rot, val, , , corta]) => html`<td class=${[corta || '',
         rot === 'OBSERVACIONES' ? 'largo' : '',
+        COLS_DESTACADAS.has(rot) ? 'col-destacada' : '',
         rot === 'Fecha de Instalación' && recienInstalado(t) ? 'marca-inst' : ''].filter(Boolean).join(' ')}>
       ${rot === 'N° Serie' ? html`<b>${val(t) || ''}</b>`
         : rot === 'OBSERVACIONES' ? resaltarMontos(val(t), tam)
         : (val(t) || '')}</td>`)}
   </tr>`);
+
+  /* Letterhead de la hoja (logo, semana/zona, técnico, vehículo, viáticos).
+     Va DENTRO del <thead> de cada tabla impresa (además de mostrarse arriba
+     de todo en pantalla) para que, al saltar de hoja física al imprimir, el
+     navegador la vuelva a imprimir sola junto con los títulos de columna:
+     es el mismo mecanismo por el que ya se repiten los títulos de columna. */
+  const filaTitulo = html`<tr class="fila-titulo-planilla">
+    <th colspan=${COLS_HOJA.length}>
+      <div class="encabezado-hoja">
+        <div>
+          <img class="logo-hoja" src=${LOGO_NEGRO} alt="ENSA" />
+          <div class="titulo-hoja">${gira.n_semana || ''}-Semana en: ${gira.zona || ''}</div>
+          <div class="mini">Semana del ${fecha(gira.fecha_desde, 1)}${gira.fecha_hasta ? ' al ' + fecha(gira.fecha_hasta, 1) : ''}</div>
+        </div>
+        <div class="mini der">
+          <div><b>Técnico${tec2 ? ' 1' : ''}:</b> ${tec ? tec.nombre : '—'}</div>
+          ${tec2 && html`<div><b>Técnico 2:</b> ${tec2.nombre}</div>`}
+          <div><b>Vehículo:</b> ${gira.vehiculo || '—'}</div>
+          <div><b>Viáticos entregados:</b> ${plata(gira.viaticos) || '—'}</div>
+        </div>
+      </div>
+    </th>
+  </tr>`;
 
   return html`<div class="fondo" style="justify-content:center;align-items:flex-start;padding:14px;overflow:auto">
     <div class="panel hoja-impresion" style="width:100%;max-width:1300px;background:var(--papel)">
@@ -4621,7 +4691,7 @@ function HojaRuta({ gira, paradas, alCerrar }) {
         </div>
       </div>
       <div class="panel-cuerpo">
-        <div class="encabezado-hoja">
+        <div class="encabezado-hoja no-imprimir">
           <div>
             <img class="logo-hoja" src=${LOGO_NEGRO} alt="ENSA" />
             <div class="titulo-hoja">${gira.n_semana || ''}-Semana en: ${gira.zona || ''}</div>
@@ -4634,6 +4704,8 @@ function HojaRuta({ gira, paradas, alCerrar }) {
             <div><b>Viáticos entregados:</b> ${plata(gira.viaticos) || '—'}</div>
           </div>
         </div>
+        <div class="mini no-imprimir" style="margin:-6px 0 10px">En la hoja impresa este
+          encabezado se repite solo al principio de cada página, junto con los títulos de columna.</div>
 
         ${grupos.map(([dia, lista]) => html`<div key=${dia || 'todo'} style="margin-bottom:14px">
           ${dia && html`<div class="titulo-dia">${corte === 'tecnico'
@@ -4644,10 +4716,14 @@ function HojaRuta({ gira, paradas, alCerrar }) {
               <colgroup>
                 ${COLS_HOJA.map((c, i) => html`<col style=${`width:${(anchos[i] / 1072 * 100).toFixed(2)}%`} />`)}
               </colgroup>
-              <thead><tr>
-                ${COLS_HOJA.map(([rot, , ancho, , corta]) => html`<th class=${corta || ''}
-                  style=${`min-width:${ancho}px`}>${rot}</th>`)}
-              </tr></thead>
+              <thead>
+                ${filaTitulo}
+                <tr>
+                  ${COLS_HOJA.map(([rot, , ancho, , corta]) => html`<th
+                    class=${[corta || '', COLS_DESTACADAS.has(rot) ? 'col-destacada' : ''].filter(Boolean).join(' ')}
+                    style=${`min-width:${ancho}px`}>${rot}</th>`)}
+                </tr>
+              </thead>
               <tbody>${filas(lista)}</tbody>
             </table>
           </div>
@@ -7501,6 +7577,9 @@ function EditarCliente({ c, alCerrar, alAbrirTrabajo }) {
         alCambiar=${v => set2('provincia', v)} disabled=${!editable} />
     </div>
     <${Txt} rot="Dirección" valor=${b.direccion} alCambiar=${v => set2('direccion', v)} disabled=${!editable} />
+    <div class="mini" style="margin:-4px 0 6px">Estos son los datos de contacto y facturación del
+      cliente. Si tiene varios equipos instalados en puntos distintos, cada dirección de
+      instalación se carga en la ficha de cada equipo, no acá.</div>
     <${Txt} rot="Correo" valor=${b.correo} alCambiar=${v => set2('correo', v)} disabled=${!editable} />
     <${Txt} rot="Observaciones" area=${2} valor=${b.observaciones} alCambiar=${v => set2('observaciones', v)}
       disabled=${!editable} />
@@ -7541,6 +7620,17 @@ function EditarEquipo({ e, alCerrar, alAbrirTrabajo }) {
     .sort((x, y) => String(y.fecha_visita || '').localeCompare(String(x.fecha_visita || '')));
   const cli = s.clientes.find(c => c.id === b.cliente_id);
 
+  /* Al elegir el cliente se completa la dirección del equipo SÓLO si todavía
+     está vacía: sirve como punto de partida cuando es el único equipo de ese
+     cliente, pero cada equipo (cada número de serie) tiene su propia
+     dirección de instalación y siempre se puede corregir. */
+  const elegirCliente = x => setB(y => ({
+    ...y, cliente_id: x ? x.id : null,
+    ciudad: y.ciudad || (x && x.ciudad) || '',
+    provincia: y.provincia || (x && x.provincia) || '',
+    direccion: y.direccion || (x && x.direccion) || '',
+  }));
+
   async function guardar() {
     const db = cliente();
     const cuerpo = { n_serie: (b.n_serie || '').toUpperCase().trim(), modelo: b.modelo, n_paradas: b.n_paradas,
@@ -7571,13 +7661,16 @@ function EditarEquipo({ e, alCerrar, alAbrirTrabajo }) {
     </div>
     <${Autocompletar} rot="Cliente" valor=${cli} lista=${s.clientes}
       textoDe=${c2 => `${c2.nombre}${c2.ciudad ? ' — ' + c2.ciudad : ''}`}
-      alElegir=${x => set2('cliente_id', x ? x.id : null)} deshabilitado=${!editable} />
+      alElegir=${elegirCliente} deshabilitado=${!editable} />
+    <div class="mini" style="margin:-4px 0 6px">El cliente es el dato de contacto y facturación.
+      La dirección de acá abajo es la de <b>este equipo en particular</b>: un mismo cliente puede
+      tener varios equipos instalados en puntos distintos, cada uno con la suya.</div>
     <div class="rejilla">
-      <${Txt} rot="Ciudad" valor=${b.ciudad} alCambiar=${v => set2('ciudad', v)} disabled=${!editable} />
-      <${Sel} rot="Provincia" valor=${b.provincia} opts=${opciones('provincia')}
+      <${Txt} rot="Ciudad de instalación" valor=${b.ciudad} alCambiar=${v => set2('ciudad', v)} disabled=${!editable} />
+      <${Sel} rot="Provincia de instalación" valor=${b.provincia} opts=${opciones('provincia')}
         alCambiar=${v => set2('provincia', v)} disabled=${!editable} />
     </div>
-    <${Txt} rot="Dirección" valor=${b.direccion} alCambiar=${v => set2('direccion', v)} disabled=${!editable} />
+    <${Txt} rot="Dirección de instalación" valor=${b.direccion} alCambiar=${v => set2('direccion', v)} disabled=${!editable} />
     <${Txt} rot="Observaciones del equipo" area=${2} valor=${b.observaciones}
       alCambiar=${v => set2('observaciones', v)} disabled=${!editable} />
     ${!b.nuevo && html`<div>
