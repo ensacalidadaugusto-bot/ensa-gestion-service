@@ -363,6 +363,12 @@ tr.recien td.congelada{box-shadow:inset 3px 0 0 var(--fila-hacer-b)}
 /* fila guardada sin internet, todavía sin subir */
 tr.en-cola td{background:var(--fila-cola)}
 tr.en-cola td.congelada{box-shadow:inset 3px 0 0 var(--fila-cola-b)}
+/* Cobranza: el caso al que se llegó desde "Abrir este trabajo en Cobranza →"
+   (Registro de Service). A diferencia de "recien", NO se apaga solo: queda
+   marcado hasta que se cambia de vista o de búsqueda, porque la idea es
+   encontrarlo fácil entre el resto, no sólo darle un destello. */
+tr.desde-service td{background:var(--fila-nueva)}
+tr.desde-service td.congelada{box-shadow:inset 4px 0 0 var(--violeta)!important}
 .btn.alerta{background:var(--error)}
 .btn.alerta:hover{background:#a5322a}
 
@@ -1288,6 +1294,38 @@ const COLOR_PRIORIDAD = { 'Alta': 'rojo', 'Media': 'ambar', 'Baja': 'gris' };
 const ABIERTOS = ['PENDIENTE', 'PROGRAMADO', 'EN REVISIÓN', 'REPROGRAMAR'];
 /* Estados que todavía se pueden asignar a una gira: un PROGRAMADO ya tiene fecha */
 const ASIGNABLES = ['PENDIENTE', 'EN REVISIÓN', 'REPROGRAMAR'];
+
+/* ---------------------------------------------------------------------
+   DÓNDE ESTÁ INSTALADO EL EQUIPO
+   La dirección que importa para ir a hacer el service es la del EQUIPO
+   (cada ascensor queda instalado en un domicilio fijo), no la del cliente
+   registrado en el trabajo: el cliente puede cambiar (nueva administración,
+   nuevo propietario) y su domicilio de contacto no tiene por qué coincidir
+   con dónde está el equipo. La ficha de Equipo ya tiene sus propios campos
+   de ciudad/provincia/dirección (solapa Clientes y equipos → Equipos).
+
+   Mientras se completa esa ficha en los equipos ya cargados, si el equipo
+   todavía no tiene su domicilio propio cargado se usa el del cliente como
+   resguardo, para no dejar la hoja de ruta ni la grilla en blanco. */
+function equipoDe(t) {
+  return t.equipo_id ? S.equipos.find(e => e.id === t.equipo_id) : null;
+}
+function direccionDe(t) {
+  const e = equipoDe(t);
+  return (e && e.direccion) || t.cliente_direccion || '';
+}
+function ciudadDe(t) {
+  const e = equipoDe(t);
+  return (e && e.ciudad) || t.cliente_ciudad || '';
+}
+function provinciaDe(t) {
+  const e = equipoDe(t);
+  return (e && e.provincia) || t.cliente_provincia || '';
+}
+/** Ciudad y provincia (del equipo si la tiene cargada) en una sola celda */
+function ubicacion(t) {
+  return [ciudadDe(t), provinciaDe(t)].filter(x => x && String(x).trim()).join(', ');
+}
 
 /* ---------------------------------------------------------------------
    CIERRE ADMINISTRATIVO
@@ -2273,16 +2311,15 @@ const COLS_REGISTRO = [
   ['Motoriz.',                   t => t.motorizacion],
   ['Puerta',                     t => t.puerta],
   ['Cliente',                    t => t.cliente_nombre],
-  ['Ciudad',                     t => t.cliente_ciudad],
-  ['Provincia',                  t => t.cliente_provincia],
-  ['Dirección',                  t => t.cliente_direccion],
+  ['Ciudad',                     t => ciudadDe(t)],
+  ['Provincia',                  t => provinciaDe(t)],
+  ['Dirección',                  t => direccionDe(t)],
   ['Teléfono',                   t => t.cliente_telefono],
   ['Fecha Pedido',               t => t.fecha_pedido && { f: t.fecha_pedido }],
   ['Tipo  Servicio',             t => t.tipo_servicio],
   ['Prioridad',                  t => t.prioridad],
   ['Estado',                     t => t.estado],
-  ['Fecha de Estado',            t => t.fecha_estado && { f: t.fecha_estado }],
-  ['Día de Estado',              t => t.fecha_estado ? DIAS[new Date(t.fecha_estado + 'T12:00:00').getDay()] : null],
+  ['Día de la visita',           t => t.fecha_visita ? DIAS[new Date(t.fecha_visita + 'T12:00:00').getDay()] : null],
   ['Técnico',                    t => t.tecnicos],
   ['Horas MO',                   t => t.horas_mo],
   ['OBSERVACIONES del Servicio', t => t.obs_servicio],
@@ -2300,8 +2337,8 @@ const COLS_REGISTRO = [
   ['CORREO',                     t => t.cliente_correo],
   ['OBSERVACIONES de Cobranza',  t => t.obs_cobranza],
   ['Service + Garantía',         t => ['Service', 'Garantía'].includes(t.tipo_pedido) ? 'Service' : 'Filtrar'],
-  ['AÑO',                        t => t.fecha_estado ? Number(String(t.fecha_estado).slice(0, 4)) : null],
-  ['mes',                        t => t.fecha_estado ? MESES[Number(String(t.fecha_estado).slice(5, 7)) - 1].toUpperCase() : null],
+  ['AÑO',                        t => t.fecha_visita ? Number(String(t.fecha_visita).slice(0, 4)) : null],
+  ['mes',                        t => t.fecha_visita ? MESES[Number(String(t.fecha_visita).slice(5, 7)) - 1].toUpperCase() : null],
   ['Cierre',                     t => t.cierre],
   ['Semana de la gira',          t => t.n_semana],
   ['Zona de la gira',            t => t.gira_zona],
@@ -2314,7 +2351,7 @@ const COLS_REGISTRO = [
 /* Hoja de cobranza: sólo lo facturable, con el circuito completo */
 const COLS_COBRANZA = [
   ['N° LL',                t => t.n_llamada],
-  ['Fecha del servicio',   t => t.fecha_estado && { f: t.fecha_estado }],
+  ['Fecha del servicio',   t => t.fecha_visita && { f: t.fecha_visita }],
   ['Cliente',              t => t.cliente_nombre],
   ['CUIT - DNI',           t => t.cliente_cuit],
   ['Correo',               t => t.cliente_correo],
@@ -2333,7 +2370,7 @@ const COLS_COBRANZA = [
   ['COBRADO',              t => t.cobrado],
   ['Fecha de Pago',        t => t.fecha_pago && { f: t.fecha_pago }],
   ['Días desde la factura', t => {
-    const ref = t.fecha_factura || t.fecha_estado;
+    const ref = t.fecha_factura || t.fecha_visita;
     if (!ref || t.cobrado === 'SI') return null;
     return Math.round((Date.now() - new Date(ref + 'T12:00:00')) / 86400000);
   }],
@@ -2353,9 +2390,9 @@ function libroDeRespaldo() {
   const facturables = registro.filter(t => Number(t.precio_sin_iva) > 0 || t.factura_solicitada);
 
   /* ---- hoja de resumen ---- */
-  const anios = [...new Set(registro.map(t => String(t.fecha_estado || '').slice(0, 4)).filter(a => a.length === 4))].sort();
+  const anios = [...new Set(registro.map(t => String(t.fecha_visita || '').slice(0, 4)).filter(a => a.length === 4))].sort();
   const porAnio = anios.map(a => {
-    const l = registro.filter(t => String(t.fecha_estado || '').slice(0, 4) === a);
+    const l = registro.filter(t => String(t.fecha_visita || '').slice(0, 4) === a);
     const suma = f => l.filter(f).reduce((x, t) => x + (Number(t.precio_sin_iva) || 0), 0);
     return [a, l.length,
       l.filter(t => (t.tipo_pedido || '').startsWith('Garantía')).length,
@@ -2371,8 +2408,8 @@ function libroDeRespaldo() {
     const l = registro.filter(t => (t.tecnicos || '').split(' / ').includes(tc.nombre));
     return [tc.nombre, tc.activo ? 'SI' : 'NO', l.length,
       Math.round(l.reduce((x, t) => x + (Number(t.horas_mo) || 0), 0) * 10) / 10,
-      l.length ? (l.slice().sort((a, b) => String(b.fecha_estado || '').localeCompare(String(a.fecha_estado || '')))[0].fecha_estado
-        ? { f: l.slice().sort((a, b) => String(b.fecha_estado || '').localeCompare(String(a.fecha_estado || '')))[0].fecha_estado } : null) : null];
+      l.length ? (l.slice().sort((a, b) => String(b.fecha_visita || '').localeCompare(String(a.fecha_visita || '')))[0].fecha_visita
+        ? { f: l.slice().sort((a, b) => String(b.fecha_visita || '').localeCompare(String(a.fecha_visita || '')))[0].fecha_visita } : null) : null];
   }).sort((a, b) => b[2] - a[2]);
 
   const ruta = [];
@@ -2381,10 +2418,10 @@ function libroDeRespaldo() {
       s.trabajos.filter(t => t.gira_id === g.id)
         .sort((a, b) => String(a.fecha_visita || '').localeCompare(String(b.fecha_visita || '')))
         .forEach(t => ruta.push([
-          g.n_semana, g.anio, g.zona, nombreTec(g.tecnico_id), g.vehiculo, g.viaticos,
+          g.n_semana, g.anio, g.zona, nombreTec(g.tecnico_id), nombreTec(g.tecnico2_id), g.vehiculo, g.viaticos,
           t.n_llamada, t.tipo_pedido, t.fecha_instalacion && { f: t.fecha_instalacion }, t.n_serie,
-          t.modelo, t.n_paradas, t.motorizacion, t.puerta, t.cliente_nombre, t.cliente_ciudad,
-          t.cliente_provincia, t.cliente_direccion, t.cliente_telefono,
+          t.modelo, t.n_paradas, t.motorizacion, t.puerta, t.cliente_nombre, ciudadDe(t),
+          provinciaDe(t), direccionDe(t), t.cliente_telefono,
           t.fecha_pedido && { f: t.fecha_pedido }, t.tipo_servicio,
           t.fecha_visita && { f: t.fecha_visita }, t.obs_servicio, t.tecnicos, t.estado, t.confirmacion,
         ]));
@@ -2429,7 +2466,7 @@ function libroDeRespaldo() {
     },
     {
       nombre: 'Imprimir - Gira Service',
-      columnas: ['Semana', 'Año', 'Zona', 'Técnico de la gira', 'Vehículo', 'Viáticos',
+      columnas: ['Semana', 'Año', 'Zona', 'Técnico de la gira', 'Técnico 2 de la gira', 'Vehículo', 'Viáticos',
         'N° LL', 'Tipo de Pedido', 'Fecha de Instalación', 'N° Serie', 'Mod.', 'N° P', 'MOT.',
         'Puerta', 'Cliente', 'Ciudad', 'Provincia', 'Dirección', 'Teléfono', 'Fecha Pedido',
         'Tipo  Servicio', 'VISITA', 'OBSERVACIONES', 'Técnico del trabajo', 'Estado', 'Confirmación'],
@@ -2451,7 +2488,7 @@ function libroDeRespaldo() {
         'Correo', 'Observaciones', 'Equipos', 'Trabajos', 'Facturado', 'Pendiente de cobro', 'Último trabajo'],
       filas: s.clientes.map(c => {
         const t = s.trabajos.filter(x => x.cliente_id === c.id);
-        const ult = t.map(x => x.fecha_estado).filter(Boolean).sort().pop();
+        const ult = t.map(x => x.fecha_visita).filter(Boolean).sort().pop();
         return [c.nombre, c.cuit_dni, c.ciudad, c.provincia, c.direccion, c.telefono, c.correo,
           c.observaciones,
           s.equipos.filter(e => e.cliente_id === c.id).map(e => e.n_serie).join(' / '),
@@ -2468,7 +2505,7 @@ function libroDeRespaldo() {
         'Atenciones', 'De garantía', 'Horas de MO', 'Última atención', 'Observaciones'],
       filas: s.equipos.map(e => {
         const t = s.trabajos.filter(x => x.equipo_id === e.id);
-        const ult = t.map(x => x.fecha_estado).filter(Boolean).sort().pop();
+        const ult = t.map(x => x.fecha_visita).filter(Boolean).sort().pop();
         return [e.n_serie, e.modelo, e.n_paradas, e.motorizacion, e.puerta,
           e.fecha_instalacion && { f: e.fecha_instalacion }, nombreCli(e.cliente_id),
           e.ciudad, e.provincia, e.direccion, t.length,
@@ -2545,7 +2582,7 @@ async function exportarTrabajos(filas, filtro, verPlata) {
     // la columna de ciudad y provincia junta, como en la pantalla
     const iCiudad = cols.findIndex(c => c[0] === 'Ciudad');
     if (iCiudad >= 0) cols.splice(iCiudad, 0, ['Ciudad y provincia',
-      t => [t.cliente_ciudad, t.cliente_provincia].filter(Boolean).join(', ')]);
+      t => [ciudadDe(t), provinciaDe(t)].filter(Boolean).join(', ')]);
     if (!verPlata) cols = cols.filter(c => !PLATA.includes(c[0]));
 
     const hojas = [
@@ -2616,6 +2653,63 @@ function MarcaCierre({ t }) {
     ⚠ ABIERTO</span>`;
 }
 
+/* ---------------------------------------------------------------------
+   REFERENCIAS: qué significa cada color y cada etiqueta del Registro de
+   Service. El texto de cada estado, facturación y cobro sale directo del
+   catálogo (el mismo que se administra en Listas y precios), así que si
+   se corrige la descripción de un estado ahí, esta pantalla se actualiza
+   sola. El color del borde de la fila no está en ningún catálogo, así
+   que va escrito a mano acá.
+   --------------------------------------------------------------------- */
+function Leyenda({ alCerrar }) {
+  const Swatch = v => html`<span style="display:inline-block;width:14px;height:14px;border-radius:3px;
+    background:var(--${v});flex:none;margin-top:3px"></span>`;
+  const Fila = (marca, texto, det) => html`<div class="fila" style="align-items:flex-start;gap:10px;margin-bottom:8px">
+    ${marca}<div>${texto ? html`<div>${texto}</div>` : ''}${det ? html`<div class="mini">${det}</div>` : ''}</div>
+  </div>`;
+
+  const TONOS = [
+    ['ok', 'Listo', 'Cumplido y cerrado: no queda nada pendiente.'],
+    ['error', 'Abierto', 'Cumplido pero todavía abierto administrativamente: falta definir la facturación y/o cargar las observaciones del servicio.'],
+    ['fila-hacer-b', 'Por hacer', 'Pendiente o programado: todavía no se hizo la visita.'],
+    ['violeta', 'A revisar', 'En revisión o a reprogramar.'],
+    ['borde', 'Cancelado', 'Se canceló la visita.'],
+  ];
+  const PRIORIDAD_DET = { Alta: 'El ascensor no funciona: la más urgente.',
+    Media: 'Funciona con alguna falla o deficiencia.', Baja: 'Mantenimiento preventivo u otra tarea sin apuro.' };
+
+  return html`<${Modal} titulo="Referencias del Registro de Service" alCerrar=${alCerrar} ancho=${680}>
+    <fieldset><legend>Color del borde de cada fila</legend>
+      <div class="mini" style="margin-bottom:10px">En qué anda el trabajo, de un solo vistazo, sin leer nada.</div>
+      ${TONOS.map(([v, rot, det]) => Fila(Swatch(v), html`<b>${rot}</b>`, det))}
+    </fieldset>
+    <fieldset><legend>Estado</legend>
+      ${opciones('estado').map(v => Fila(html`<${Et} txt=${v} mapa=${COLOR_ESTADO} />`, '', detalleCat('estado', v)))}
+    </fieldset>
+    <fieldset><legend>Facturado</legend>
+      ${opciones('facturado').map(v => Fila(html`<${Et} txt=${v} mapa=${COLOR_COBRO} />`, '', detalleCat('facturado', v)))}
+    </fieldset>
+    <fieldset><legend>Cobrado</legend>
+      ${opciones('cobrado').map(v => Fila(html`<${Et} txt=${v} mapa=${COLOR_COBRO} />`, '', detalleCat('cobrado', v)))}
+    </fieldset>
+    <fieldset><legend>Prioridad</legend>
+      ${opciones('prioridad').map(v => Fila(html`<${Et} txt=${v} mapa=${COLOR_PRIORIDAD} />`, '', PRIORIDAD_DET[v] || ''))}
+    </fieldset>
+    <fieldset><legend>Cierre administrativo</legend>
+      ${Fila(html`<span class="et verde">CERRADO</span>`, '',
+        'El trabajo ya está terminado también en lo administrativo: facturación definida y observaciones cargadas (o cobrado en efectivo).')}
+      ${Fila(html`<span class="et alarma">⚠ ABIERTO</span>`, '',
+        'Cumplido pero falta algo para cerrarlo del lado administrativo. Se ve también en Cobranza, en "Cumplidos sin cerrar".')}
+    </fieldset>
+    <fieldset><legend>Otras señales de esta grilla</legend>
+      ${Fila(Swatch('error'), html`<b>Texto de toda la fila en rojo</b>`,
+        'Mismo significado que el borde rojo: cumplido y abierto hace tiempo, esperando que se cierre.')}
+      ${Fila(Swatch('error'), html`<b>"visita antes del mes"</b>, en rojo debajo de la fecha`,
+        `El equipo fue instalado menos de ${DIAS_RECIEN_INSTALADO} días antes de esa visita: puede tratarse de un reclamo temprano después de instalar.`)}
+    </fieldset>
+  <//>`;
+}
+
 function Campo({ rot, children, ancho }) {
   return html`<label class="campo" style=${ancho ? `grid-column:span ${ancho}` : ''}>
     <span>${rot}</span>${children}</label>`;
@@ -2656,6 +2750,36 @@ function Txt({ rot, valor, alCambiar, tipo = 'text', area, disabled, placeholder
   const el = area ? html`<textarea ...${props} rows=${area}></textarea>`
                   : html`<input type=${tipo} ...${props} />`;
   return rot ? html`<${Campo} rot=${rot} ancho=${ancho}>${el}<//>` : el;
+}
+
+/* Carga de horas de mano de obra con horas enteras + minutos predefinidos
+   (00 / 15 / 30 / 45), en vez de tener que escribir el número decimal a
+   mano. Por dentro sigue siendo el mismo campo de siempre (horas_mo, un
+   número con la fracción de hora): acá sólo se decompone para cargarlo y
+   se vuelve a componer al elegir. */
+function HorasMin({ rot, valor, alCambiar, disabled }) {
+  const totalMin = Math.round((Number(valor) || 0) * 60);
+  const horas = Math.floor(totalMin / 60);
+  const minCrudo = totalMin % 60;
+  // se redondea a los 15' más cercanos, sólo para elegir el desplegable
+  const minutos = [0, 15, 30, 45].reduce((a, b) =>
+    Math.abs(b - minCrudo) < Math.abs(a - minCrudo) ? b : a, 0);
+  const disparar = (h, m) => {
+    const n = (Number(h) || 0) + (Number(m) || 0) / 60;
+    alCambiar(n ? Math.round(n * 100) / 100 : null);
+  };
+  return html`<${Campo} rot=${rot}>
+    <div class="fila" style="gap:6px;flex-wrap:nowrap">
+      <input type="number" min="0" step="1" style="width:64px" value=${valor ? horas : ''}
+        placeholder="0" disabled=${disabled}
+        onInput=${e => disparar(e.target.value, minutos)} />
+      <span class="mini">h</span>
+      <select style="width:78px" disabled=${disabled} value=${minutos}
+        onChange=${e => disparar(horas, e.target.value)}>
+        ${[0, 15, 30, 45].map(m => html`<option value=${m}>${String(m).padStart(2, '0')} min</option>`)}
+      </select>
+    </div>
+  <//>`;
 }
 
 /** Buscador con sugerencias (clientes, equipos, etc.) */
@@ -2804,12 +2928,11 @@ function Deslizador({ para }) {
    ===================================================================== */
 const FILTRO_VACIO = {
   texto: '', estado: '', tipo_pedido: '', tipo_servicio: '', tecnico: '',
-  anio: '', mes: '', desde: '', hasta: '', campoFecha: 'fecha_estado',
+  anio: '', mes: '', desde: '', hasta: '', campoFecha: 'fecha_visita',
   facturado: '', cobrado: '', abiertos: false, prioridad: '', cierre: '',
 };
 /* Qué fecha se usa para filtrar por período */
 const FECHAS_FILTRO = [
-  ['fecha_estado', 'Fecha del estado'],
   ['fecha_visita', 'Fecha de visita'],
   ['fecha_pedido', 'Fecha del pedido'],
   ['fecha_factura', 'Fecha de factura'],
@@ -2817,16 +2940,11 @@ const FECHAS_FILTRO = [
 ];
 /** La fecha con la que se filtra: la elegida y, si está vacía, la que haya */
 function fechaDe(r, campo) {
-  const v = r[campo || 'fecha_estado'];
+  const v = r[campo || 'fecha_visita'];
   if (v) return String(v).slice(0, 10);
-  if (!campo || campo === 'fecha_estado') return String(r.fecha_visita || r.fecha_pedido || '').slice(0, 10);
+  if (!campo || campo === 'fecha_visita') return String(r.fecha_visita || r.fecha_pedido || '').slice(0, 10);
   return '';
 }
-/** Ciudad y provincia en una sola celda: "Paraná, Entre Ríos" */
-function ubicacion(r) {
-  return [r.cliente_ciudad, r.cliente_provincia].filter(x => x && String(x).trim()).join(', ');
-}
-
 function filtrar(trabajos, f) {
   const t = sinAcentos(f.texto).trim();
   const palabras = t ? t.split(/\s+/) : [];
@@ -2849,9 +2967,9 @@ function filtrar(trabajos, f) {
       if (f.hasta && d > f.hasta) return false;
     }
     if (palabras.length) {
-      const blob = sinAcentos([r.n_llamada, r.cliente_nombre, r.n_serie, r.modelo, r.cliente_ciudad,
+      const blob = sinAcentos([r.n_llamada, r.cliente_nombre, r.n_serie, r.modelo, ciudadDe(r),
         r.cliente_telefono, r.concepto,
-        r.cliente_provincia, r.cliente_direccion, r.obs_servicio, r.concepto, r.tecnicos,
+        provinciaDe(r), direccionDe(r), r.obs_servicio, r.concepto, r.tecnicos,
         r.comentarios, r.obs_cobranza, r.tipo_servicio, r.tipo_pedido].join(' '));
       if (!palabras.every(p => blob.includes(p))) return false;
     }
@@ -2862,11 +2980,12 @@ function filtrar(trabajos, f) {
 function Trabajos() {
   const s = useS();
   const [f, setF] = useState(FILTRO_VACIO);
-  const [orden, setOrden] = useState({ campo: 'id', asc: false });
+  const [orden, setOrden] = useState({ campo: 'fecha_visita', asc: false });
   const [tope, setTope] = useState(250);
   const [abierto, setAbierto] = useState(null);   // id del trabajo en ficha
   const [nuevo, setNuevo] = useState(false);
   const [verFechas, setVerFechas] = useState(false);
+  const [verLeyenda, setVerLeyenda] = useState(false);
   const caja = useRef(null);            // la caja que se desplaza de costado
   const [borrando, setBorrando] = useState(null);   // trabajo que se está por borrar
   const cambiar = (k, v) => { setF({ ...f, [k]: v }); setTope(250); };
@@ -2903,7 +3022,7 @@ function Trabajos() {
     if (!filtrar([nuevoT], f).length || !ordenar(filtrar(s.trabajos, f), orden)
         .slice(0, tope).some(t => String(t.id) === String(s.destacado))) {
       setF(FILTRO_VACIO);
-      setOrden({ campo: 'id', asc: false });
+      setOrden({ campo: 'fecha_visita', asc: false });
       setTope(250);
       toast('Se limpió el filtro para mostrarte el trabajo recién cargado');
     }
@@ -2923,13 +3042,14 @@ function Trabajos() {
     { rot: 'N° Serie', val: t => t.n_serie }, { rot: 'Modelo', val: t => t.modelo },
     { rot: 'Fecha de instalación', val: t => fecha(t.fecha_instalacion, 1) },
     { rot: 'Paradas', val: t => t.n_paradas }, { rot: 'Cliente', val: t => t.cliente_nombre },
-    { rot: 'Dirección', val: t => t.cliente_direccion },
+    { rot: 'Dirección', val: t => direccionDe(t) },
     { rot: 'Ciudad y provincia', val: t => ubicacion(t) },
-    { rot: 'Ciudad', val: t => t.cliente_ciudad }, { rot: 'Provincia', val: t => t.cliente_provincia },
+    { rot: 'Ciudad', val: t => ciudadDe(t) }, { rot: 'Provincia', val: t => provinciaDe(t) },
     { rot: 'Teléfono', val: t => t.cliente_telefono },
     { rot: 'Tipo de servicio', val: t => t.tipo_servicio }, { rot: 'Prioridad', val: t => t.prioridad },
     { rot: 'Estado', val: t => t.estado }, { rot: 'Cierre', val: t => cierreQueCorresponde(t) || '' },
-    { rot: 'Fecha de estado', val: t => fecha(t.fecha_estado, 1) },
+    { rot: 'Semana', val: t => t.n_semana || '' },
+    { rot: 'Fecha de visita', val: t => fecha(t.fecha_visita, 1) },
     { rot: 'Técnico', val: t => t.tecnicos }, { rot: 'Horas MO', val: t => t.horas_mo },
     { rot: 'Observaciones', val: t => t.obs_servicio },
     { rot: 'Precio sin IVA', val: t => t.precio_sin_iva }, { rot: 'Facturado', val: t => t.facturado },
@@ -2981,6 +3101,8 @@ function Trabajos() {
           onClick=${() => setF({ ...FILTRO_VACIO, cierre: f.cierre === 'ABIERTO' ? '' : 'ABIERTO' })}>
           ⚠ ${sinCerrar} sin cerrar</button>`}
         <div style="margin-left:auto" class="fila">
+          <button class="btn sec chico" title="Qué significa cada color y cada etiqueta de esta grilla"
+            onClick=${() => setVerLeyenda(true)}>Referencias</button>
           <button class="btn sec chico" title=${`Descarga en Excel los ${filtrados.length} registros que estás viendo, con toda la información`}
             onClick=${() => exportarTrabajos(filtrados, f, verPlata)}>
             Exportar (${filtrados.length.toLocaleString('es-AR')})</button>
@@ -3052,13 +3174,14 @@ function Trabajos() {
           <${Th} campo="modelo" rot="Mod." orden=${orden} setOrden=${setOrden} clase="c-modelo" />
           <${Th} campo="fecha_instalacion" rot="Instal." orden=${orden} setOrden=${setOrden} clase="c-inst" />
           <${Th} campo="cliente_nombre" rot="Cliente" orden=${orden} setOrden=${setOrden} clase="c-cliente corte" />
-          <${Th} campo="cliente_direccion" rot="Dirección" orden=${orden} setOrden=${setOrden} clase="c-dir" />
-          <${Th} campo="cliente_ciudad" rot="Ciudad y provincia" orden=${orden} setOrden=${setOrden} clase="c-ciudad" />
+          <th class="c-dir">Dirección</th>
+          <th class="c-ciudad">Ciudad y provincia</th>
           <${Th} campo="tipo_servicio" rot="Servicio" orden=${orden} setOrden=${setOrden} clase="c-serv corte" />
           <${Th} campo="prioridad" rot="Prior." orden=${orden} setOrden=${setOrden} clase="c-prior" />
           <${Th} campo="estado" rot="Estado" orden=${orden} setOrden=${setOrden} clase="c-estado" />
           ${verPlata && html`<${Th} campo="cierre" rot="Cierre" orden=${orden} setOrden=${setOrden} clase="c-cierre" />`}
-          <${Th} campo="fecha_estado" rot="Fecha" orden=${orden} setOrden=${setOrden} clase="c-fecha" />
+          <${Th} campo="n_semana" rot="Semana" orden=${orden} setOrden=${setOrden} clase="c-semana" />
+          <${Th} campo="fecha_visita" rot="Fecha" orden=${orden} setOrden=${setOrden} clase="c-fecha" />
           <th class="c-obs corte">Observaciones del servicio</th>
           <${Th} campo="tecnicos" rot="Técnico" orden=${orden} setOrden=${setOrden} clase="c-tec" />
           ${verPlata && html`<${Th} campo="precio_sin_iva" rot="Precio s/IVA" orden=${orden} setOrden=${setOrden} clase="c-precio corte" />`}
@@ -3093,13 +3216,14 @@ function Trabajos() {
             <td class="corta apoyo">${t.modelo}</td>
             <td class="fecha apoyo">${fecha(t.fecha_instalacion, 1)}</td>
             <td class="cliente corte" title=${t.cliente_nombre}><div class="rec">${t.cliente_nombre}</div></td>
-            <td class="apoyo" title=${t.cliente_direccion}><div class="rec">${t.cliente_direccion || ''}</div></td>
+            <td class="apoyo" title=${direccionDe(t)}><div class="rec">${direccionDe(t)}</div></td>
             <td class="apoyo" title=${ubicacion(t)}><div class="rec">${ubicacion(t)}</div></td>
             <td class="corte"><div class="rec">${t.tipo_servicio}</div></td>
             <td class="etq"><${Et} txt=${t.prioridad} mapa=${COLOR_PRIORIDAD} /></td>
             <td class="etq"><${Et} txt=${t.estado} mapa=${COLOR_ESTADO} /></td>
             ${verPlata && html`<td class="etq"><${MarcaCierre} t=${t} /></td>`}
-            <td class="fecha">${fecha(t.fecha_estado)}${recienInstalado(t)
+            <td class="corta apoyo">${t.n_semana || ''}</td>
+            <td class="fecha">${fecha(t.fecha_visita)}${recienInstalado(t)
               ? html`<div><span class="marca-recien">visita antes del mes</span></div>` : ''}</td>
             <td class="apoyo corte" title=${t.obs_servicio}><div class="rec">${t.obs_servicio}</div></td>
             <td title=${t.tecnicos}><div class="rec">${t.tecnicos}</div></td>
@@ -3126,6 +3250,7 @@ function Trabajos() {
       ? html`<${Ficha} id=${abierto} alCerrar=${() => setAbierto(null)} />`
       : html`<${FichaConsulta} id=${abierto} alCerrar=${() => setAbierto(null)} />`)}
     ${nuevo && html`<${Ficha} nuevo alCerrar=${() => setNuevo(false)} />`}
+    ${verLeyenda && html`<${Leyenda} alCerrar=${() => setVerLeyenda(false)} />`}
   </div>`;
 }
 
@@ -3196,7 +3321,6 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
   const elegirEstado = v => setB(x => ({
     ...x, estado: v,
     cierre: v === 'CUMPLIDO' ? (x.cierre === 'CERRADO' ? 'CERRADO' : 'ABIERTO') : null,
-    fecha_estado: v === 'CUMPLIDO' && !x.fecha_estado ? (x.fecha_visita || hoyISO()) : x.fecha_estado,
   }));
   /* Los datos de cobranza ya no se editan desde acá: se muestran y se guardan
      siempre como están en el módulo Cobranza, para no pisar lo que cargó
@@ -3224,7 +3348,7 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
 
   const historialEquipo = useMemo(() => !b.equipo_id ? []
     : s.trabajos.filter(t => t.equipo_id === b.equipo_id && t.id !== id)
-        .sort((x, y) => String(y.fecha_estado || '').localeCompare(String(x.fecha_estado || ''))),
+        .sort((x, y) => String(y.fecha_visita || '').localeCompare(String(x.fecha_visita || ''))),
     [s.trabajos, b.equipo_id]);
 
   async function guardar(extra) {
@@ -3233,13 +3357,12 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
     try {
       const datos = { ...b, ...cobranzaViva(), ...(extra || {}) };
       const campos = ['correlativo','n_llamada','cliente_id','equipo_id','tipo_pedido','tipo_servicio',
-        'prioridad','estado','cierre','fecha_pedido','fecha_visita','fecha_estado','gira_id','orden_gira',
+        'prioridad','estado','cierre','fecha_pedido','fecha_visita','gira_id','orden_gira',
         'confirmacion','encuesta','horas_mo','obs_servicio','comentarios','precio_sin_iva','facturado',
         'factura_solicitada','fecha_solicitud_factura','fecha_factura','tipo_factura','concepto',
         'cobrado','fecha_pago','obs_cobranza','encuesta_enviada','fecha_encuesta'];
       campos.forEach(k => { if (k in datos) cuerpo[k] = datos[k] === '' ? null : datos[k]; });
-      if (cuerpo.estado === 'CUMPLIDO' && !cuerpo.fecha_estado) cuerpo.fecha_estado = hoyISO();
-      if (cobradoEnMano(cuerpo) && !cuerpo.fecha_pago) cuerpo.fecha_pago = cuerpo.fecha_estado || hoyISO();
+      if (cobradoEnMano(cuerpo) && !cuerpo.fecha_pago) cuerpo.fecha_pago = cuerpo.fecha_visita || hoyISO();
       cuerpo = cierreAutomatico(cuerpo);
       let res;
       if (nuevo) {
@@ -3370,9 +3493,7 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
                 alCambiar=${elegirEstado} disabled=${!edServ} />
               <${Txt} rot="Fecha de visita" tipo="date" valor=${b.fecha_visita}
                 alCambiar=${v => c('fecha_visita', v)} disabled=${!edServ} />
-              <${Txt} rot="Fecha de estado" tipo="date" valor=${b.fecha_estado}
-                alCambiar=${v => c('fecha_estado', v)} disabled=${!edServ} />
-              <${Txt} rot="Horas de mano de obra" tipo="number" valor=${b.horas_mo}
+              <${HorasMin} rot="Horas de mano de obra" valor=${b.horas_mo}
                 alCambiar=${v => c('horas_mo', v)} disabled=${!edServ} />
               <${Sel} rot="Confirmación" valor=${b.confirmacion} opts=${opciones('confirmacion')}
                 alCambiar=${v => c('confirmacion', v)} disabled=${!edServ} />
@@ -3487,7 +3608,16 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
               <div>Motorización: <b>${eq.motorizacion || '—'}</b></div>
               <div>Puerta: <b>${eq.puerta || '—'}</b></div>
               <div>Instalado: <b>${fecha(eq.fecha_instalacion, 1) || '—'}</b></div>
+              <div>Ciudad: <b>${eq.ciudad || '—'}</b></div>
+              <div>Provincia: <b>${eq.provincia || '—'}</b></div>
+              <div style="grid-column:1/-1">Dirección de instalación: <b>${eq.direccion || '—'}</b></div>
             </div>`}
+            ${eq && !eq.direccion && cli && cli.direccion && html`<div class="mini" style="opacity:.8">
+              El equipo todavía no tiene cargada su propia dirección: mientras tanto se usa la del
+              cliente (${cli.direccion}) en la grilla y en la hoja de ruta.</div>`}
+            <div class="mini">La dirección donde está instalado el equipo se carga y se corrige acá,
+              en la ficha del <b>Equipo</b> (solapa <b>Clientes y equipos</b>): es la que se usa en
+              toda la aplicación para saber adónde ir, aunque el cliente del trabajo cambie.</div>
           </fieldset>
           <fieldset><legend>Cliente</legend>
             <${Autocompletar} rot="Cliente" valor=${cli} lista=${s.clientes}
@@ -3499,16 +3629,14 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
               <button class="btn sec chico" onClick=${() => setCreando('cliente')}>+ Cliente nuevo</button>
             </div>`}
             ${cli && html`<div class="rejilla mini">
-              <div>Ciudad: <b>${cli.ciudad || '—'}</b></div>
-              <div>Provincia: <b>${cli.provincia || '—'}</b></div>
-              <div>Dirección: <b>${cli.direccion || '—'}</b></div>
               <div>Teléfono: <b>${cli.telefono || '—'}</b></div>
               <div>Correo: <b>${cli.correo || '—'}</b></div>
               <div>CUIT/DNI: <b>${cli.cuit_dni || '—'}</b></div>
             </div>`}
             <div class="mini">Este es el cliente <b>de este trabajo</b>: es el nombre que sale en la
               hoja de ruta del técnico y en la facturación, aunque el equipo esté registrado a nombre
-              de otra persona. Los datos de contacto se editan en la solapa <b>Clientes y equipos</b>.</div>
+              de otra persona. Los datos de contacto se editan en la solapa <b>Clientes y equipos</b>.
+              La dirección de instalación se ve y se corrige en <b>Equipo</b>, arriba.</div>
           </fieldset>
         </div>`}
 
@@ -3605,7 +3733,7 @@ function BorrarTrabajo({ t, alCerrar }) {
       <div>Cliente: <b>${t.cliente_nombre || '—'}</b></div>
       <div>Equipo: <b>${t.n_serie || '—'}</b></div>
       <div>Estado: <b>${t.estado || '—'}</b></div>
-      <div>Fecha: <b>${fecha(t.fecha_estado || t.fecha_visita, 1) || '—'}</b></div>
+      <div>Fecha: <b>${fecha(t.fecha_visita, 1) || '—'}</b></div>
       ${puedeVerPlata() && Number(t.precio_sin_iva) > 0
         && html`<div>Precio: <b>${plata(t.precio_sin_iva)}</b></div>`}
       ${t.tecnicos && html`<div>Técnico: <b>${t.tecnicos}</b></div>`}
@@ -3754,6 +3882,7 @@ function NuevoEquipo({ inicial, clienteId, alCerrar, alCrear }) {
   const [b, setB] = useState({ n_serie: inicial || '', modelo: '', n_paradas: '', motorizacion: '',
                                puerta: '', fecha_instalacion: '', cliente_id: clienteId || null });
   const [yendo, setYendo] = useState(false);
+  const [creandoCliente, setCreandoCliente] = useState(false);
   const c = (k, v) => setB(x => ({ ...x, [k]: v }));
   const serie = (b.n_serie || '').trim();
   const repetido = S.equipos.find(e => sinAcentos(e.n_serie) === sinAcentos(serie));
@@ -3787,6 +3916,10 @@ function NuevoEquipo({ inicial, clienteId, alCerrar, alCrear }) {
     <${Autocompletar} rot="Cliente del equipo" valor=${cli} lista=${s.clientes}
       textoDe=${x => `${x.nombre}${x.ciudad ? ' — ' + x.ciudad : ''}`}
       alElegir=${x => c('cliente_id', x ? x.id : null)} placeholder="Buscar cliente…" />
+    <div class="fila mini" style="margin:-4px 0 6px">
+      <span>¿Es un cliente nuevo?</span>
+      <button class="btn sec chico" onClick=${() => setCreandoCliente(true)}>+ Cliente nuevo</button>
+    </div>
     <div class="rejilla">
       <${Sel} rot="Modelo" valor=${b.modelo} opts=${opciones('modelo')}
         alCambiar=${v => c('modelo', v)} />
@@ -3808,6 +3941,8 @@ function NuevoEquipo({ inicial, clienteId, alCerrar, alCrear }) {
       <button class="btn" disabled=${!serie || !!repetido || yendo} onClick=${guardar}>
         ${yendo ? 'Creando…' : 'Crear equipo'}</button>
     </div>
+    ${creandoCliente && html`<${NuevoCliente} alCerrar=${() => setCreandoCliente(false)}
+      alCrear=${x => c('cliente_id', x.id)} />`}
   <//>`;
 }
 
@@ -3832,7 +3967,7 @@ function FichaConsulta({ id, alCerrar }) {
 
   const historial = useMemo(() => !t.equipo_id ? []
     : s.trabajos.filter(x => x.equipo_id === t.equipo_id && x.id !== t.id)
-        .sort((a, b) => String(b.fecha_estado || '').localeCompare(String(a.fecha_estado || ''))),
+        .sort((a, b) => String(b.fecha_visita || '').localeCompare(String(a.fecha_visita || ''))),
     [s.trabajos, t.equipo_id]);
 
   return html`<div class="fondo" onClick=${e => e.target.className === 'fondo' && alCerrar()}>
@@ -3851,7 +3986,6 @@ function FichaConsulta({ id, alCerrar }) {
             <${Dato} rot="Prioridad" val=${t.prioridad} ancho=${90} />
             <${Dato} rot="Fecha del pedido" val=${fecha(t.fecha_pedido, 1)} ancho=${110} />
             <${Dato} rot="Fecha de visita" val=${fecha(t.fecha_visita, 1)} ancho=${110} />
-            <${Dato} rot="Fecha del estado" val=${fecha(t.fecha_estado, 1)} ancho=${110} />
             <${Dato} rot="Horas de trabajo" val=${t.horas_mo} ancho=${100} />
             <${Dato} rot="Técnico" val=${t.tecnicos} ancho=${190} />
           </div>
@@ -3876,12 +4010,17 @@ function FichaConsulta({ id, alCerrar }) {
           </div>
         </fieldset>
 
+        <fieldset><legend>Equipo — ubicación</legend>
+          <div class="fila" style="flex-wrap:wrap;gap:18px">
+            <${Dato} rot="Ciudad" val=${ciudadDe(t)} />
+            <${Dato} rot="Provincia" val=${provinciaDe(t)} />
+            <${Dato} rot="Dirección" val=${direccionDe(t)} ancho=${230} />
+          </div>
+        </fieldset>
+
         <fieldset><legend>Cliente</legend>
           <div class="fila" style="flex-wrap:wrap;gap:18px">
             <${Dato} rot="Nombre" val=${t.cliente_nombre} ancho=${240} />
-            <${Dato} rot="Ciudad" val=${t.cliente_ciudad} />
-            <${Dato} rot="Provincia" val=${t.cliente_provincia} />
-            <${Dato} rot="Dirección" val=${t.cliente_direccion} ancho=${230} />
             <${Dato} rot="Teléfono" val=${t.cliente_telefono} ancho=${150} />
           </div>
         </fieldset>
@@ -3891,7 +4030,7 @@ function FichaConsulta({ id, alCerrar }) {
           ${historial.slice(0, 40).map(x => html`<div key=${x.id}
             style="border-bottom:1px solid var(--borde);padding:6px 0">
             <div class="fila" style="gap:6px">
-              <b>${fecha(x.fecha_estado, 1) || '—'}</b>
+              <b>${fecha(x.fecha_visita, 1) || '—'}</b>
               <span>${x.tipo_servicio || ''}${x.tipo_pedido ? ' · ' + x.tipo_pedido : ''}</span>
               ${x.horas_mo ? html`<span class="et gris">${x.horas_mo} h</span>` : null}
               <span class="crece"></span>
@@ -3932,13 +4071,13 @@ function HistorialImprimible({ equipoId, alCerrar }) {
 
   const lista = useMemo(() => s.trabajos
     .filter(t => t.equipo_id === equipoId && t.estado === 'CUMPLIDO')
-    .filter(t => !desde || (t.fecha_estado || '') >= desde)
-    .sort((a, b) => String(b.fecha_estado || '').localeCompare(String(a.fecha_estado || ''))),
+    .filter(t => !desde || (t.fecha_visita || '') >= desde)
+    .sort((a, b) => String(b.fecha_visita || '').localeCompare(String(a.fecha_visita || ''))),
     [s.trabajos, equipoId, desde]);
 
   const horas = lista.reduce((a, t) => a + (Number(t.horas_mo) || 0), 0);
   const anios = [...new Set(s.trabajos.filter(t => t.equipo_id === equipoId)
-    .map(t => String(t.fecha_estado || '').slice(0, 4)).filter(Boolean))].sort();
+    .map(t => String(t.fecha_visita || '').slice(0, 4)).filter(Boolean))].sort();
 
   if (!eq) return null;
   return html`<div class="fondo" style="justify-content:center;align-items:flex-start;padding:14px;overflow:auto">
@@ -3987,7 +4126,7 @@ function HistorialImprimible({ equipoId, alCerrar }) {
             </tr></thead>
             <tbody>
               ${lista.map(t => html`<tr key=${t.id}>
-                <td><b>${fecha(t.fecha_estado, 1)}</b></td>
+                <td><b>${fecha(t.fecha_visita, 1)}</b></td>
                 <td>${t.tipo_pedido || ''}</td>
                 <td>${t.tipo_servicio || ''}</td>
                 <td>${t.tecnicos || ''}</td>
@@ -4014,7 +4153,7 @@ function HistorialImprimible({ equipoId, alCerrar }) {
 function LineaHistorial({ t, alAbrir }) {
   return html`<div class="ev" style=${alAbrir ? 'cursor:pointer' : ''} onClick=${alAbrir}>
     <div class="fila" style="gap:6px">
-      <b>${fecha(t.fecha_estado, 1) || '—'}</b>
+      <b>${fecha(t.fecha_visita, 1) || '—'}</b>
       <span>${t.tipo_servicio || ''}${t.tipo_pedido ? ' · ' + t.tipo_pedido : ''}</span>
       ${t.horas_mo ? html`<span class="et gris">${t.horas_mo} h</span>` : null}
       <span class="crece"></span>
@@ -4052,7 +4191,7 @@ function Giras() {
   const pendientes = useMemo(() => {
     const f = sinAcentos(busca);
     return s.trabajos.filter(t => !t.gira_id && ASIGNABLES.includes(t.estado))
-      .filter(t => !f || sinAcentos([t.cliente_nombre, t.n_serie, t.cliente_ciudad, t.cliente_provincia,
+      .filter(t => !f || sinAcentos([t.cliente_nombre, t.n_serie, ciudadDe(t), provinciaDe(t),
         t.n_llamada, t.obs_servicio].join(' ')).includes(f))
       .sort((a, b) => (b.prioridad === 'Alta') - (a.prioridad === 'Alta')
         || String(a.fecha_pedido || '').localeCompare(String(b.fecha_pedido || '')));
@@ -4095,7 +4234,7 @@ function Giras() {
     catch (e) { toast('No se pudo mover: ' + e.message, 'error'); }
   }
   async function cumplir(t) {
-    try { await guardarTrabajo(t.id, { estado: 'CUMPLIDO', fecha_estado: t.fecha_visita || hoyISO() }); }
+    try { await guardarTrabajo(t.id, { estado: 'CUMPLIDO' }); }
     catch (e) { toast('No se pudo actualizar: ' + e.message, 'error'); }
   }
 
@@ -4139,9 +4278,16 @@ function Giras() {
             alCambiar=${v => actualizarGira({ fecha_desde: v, ...semanaCampos(v) })} />
           <${Txt} rot="Hasta" tipo="date" valor=${gira.fecha_hasta} disabled=${!editable}
             alCambiar=${v => actualizarGira({ fecha_hasta: v })} />
-          <${Campo} rot="Técnico">
+          <${Campo} rot="Técnico 1">
             <select disabled=${!editable} value=${gira.tecnico_id || ''}
               onChange=${e => actualizarGira({ tecnico_id: e.target.value ? Number(e.target.value) : null })}>
+              <option value="">—</option>
+              ${s.tecnicos.filter(t => t.activo).map(t => html`<option value=${t.id}>${t.nombre}</option>`)}
+            </select>
+          <//>
+          <${Campo} rot="Técnico 2">
+            <select disabled=${!editable} value=${gira.tecnico2_id || ''}
+              onChange=${e => actualizarGira({ tecnico2_id: e.target.value ? Number(e.target.value) : null })}>
               <option value="">—</option>
               ${s.tecnicos.filter(t => t.activo).map(t => html`<option value=${t.id}>${t.nombre}</option>`)}
             </select>
@@ -4182,7 +4328,7 @@ function Giras() {
           ${pendientes.slice(0, 200).map(t => html`<div class="pend" key=${t.id}>
             <div class="info" onClick=${() => setFichaId(t.id)} style="cursor:pointer">
               <b>${t.cliente_nombre || '—'}</b>
-              <div class="mini">${t.n_serie || ''} ${t.modelo || ''} · ${t.cliente_ciudad || ''}, ${t.cliente_provincia || ''}</div>
+              <div class="mini">${t.n_serie || ''} ${t.modelo || ''} · ${ciudadDe(t) || ''}, ${provinciaDe(t) || ''}</div>
               <div class="mini">${t.tipo_servicio || ''} · ${t.n_llamada || ''} ${t.obs_servicio ? '· ' + t.obs_servicio.slice(0, 70) : ''}</div>
             </div>
             <${Et} txt=${t.prioridad} mapa=${COLOR_PRIORIDAD} />
@@ -4205,7 +4351,7 @@ function Giras() {
               <div class="ord">${i + 1}</div>
               <div class="info" onClick=${() => setFichaId(t.id)} style="cursor:pointer">
                 <b>${t.cliente_nombre || '—'} ${t.estado === 'CUMPLIDO' ? '✓' : ''}</b>
-                <small>${t.cliente_direccion || ''} — ${t.cliente_ciudad || ''}, ${t.cliente_provincia || ''}</small>
+                <small>${direccionDe(t) || ''} — ${ciudadDe(t) || ''}, ${provinciaDe(t) || ''}</small>
                 <small>${t.n_serie || ''} ${t.modelo || ''} · ${t.tipo_servicio || ''} · ${t.n_llamada || ''}
                   ${t.cliente_telefono ? ' · ☎ ' + t.cliente_telefono : ''}</small>
                 ${t.obs_servicio && html`<small>${t.obs_servicio}</small>`}
@@ -4226,8 +4372,8 @@ function Giras() {
     ${asignando && gira && html`<${Modal} titulo="¿Qué día de la semana?" ancho=${520}
         alCerrar=${() => setAsignando(null)}>
       <p><b>${asignando.cliente_nombre || '—'}</b>
-        <span class="mini">${asignando.n_serie || ''} · ${asignando.cliente_ciudad || ''},
-        ${asignando.cliente_provincia || ''} · ${asignando.tipo_servicio || ''}</span></p>
+        <span class="mini">${asignando.n_serie || ''} · ${ciudadDe(asignando) || ''},
+        ${provinciaDe(asignando) || ''} · ${asignando.tipo_servicio || ''}</span></p>
       <p class="mini">Semana ${gira.n_semana || ''} · ${fecha(gira.fecha_desde, 1)} al ${fecha(gira.fecha_hasta, 1)}</p>
       <div class="fila" style="gap:6px;margin:10px 0">
         ${diasDeLaGira.map(d => html`<button class="btn sec" key=${d} style="flex:1;min-width:120px"
@@ -4261,7 +4407,7 @@ function NuevaGira({ alCerrar }) {
   const [g, setG] = useState(() => {
     const lunes = lunesDe(hoyISO(7));
     return { fecha_desde: lunes, fecha_hasta: sumarDias(lunes, 4), zona: '', tecnico_id: null,
-             ...semanaCampos(lunes) };
+             tecnico2_id: null, ...semanaCampos(lunes) };
   });
   const c = (k, v) => setG(x => ({ ...x, [k]: v, ...(k === 'fecha_desde' ? semanaCampos(v) : {}) }));
   async function crear() {
@@ -4277,8 +4423,14 @@ function NuevaGira({ alCerrar }) {
       <${Txt} rot="Hasta" tipo="date" valor=${g.fecha_hasta} alCambiar=${v => c('fecha_hasta', v)} />
       <${Txt} rot="N° de semana" tipo="number" valor=${g.n_semana} alCambiar=${v => c('n_semana', v)} />
       <${Txt} rot="Zona" valor=${g.zona} alCambiar=${v => c('zona', v)} />
-      <${Campo} rot="Técnico">
+      <${Campo} rot="Técnico 1">
         <select value=${g.tecnico_id || ''} onChange=${e => c('tecnico_id', e.target.value ? Number(e.target.value) : null)}>
+          <option value="">—</option>
+          ${s.tecnicos.filter(t => t.activo).map(t => html`<option value=${t.id}>${t.nombre}</option>`)}
+        </select>
+      <//>
+      <${Campo} rot="Técnico 2">
+        <select value=${g.tecnico2_id || ''} onChange=${e => c('tecnico2_id', e.target.value ? Number(e.target.value) : null)}>
           <option value="">—</option>
           ${s.tecnicos.filter(t => t.activo).map(t => html`<option value=${t.id}>${t.nombre}</option>`)}
         </select>
@@ -4304,9 +4456,9 @@ const COLS_HOJA = [
   ['MOT.',                 t => t.motorizacion,            48,  4.2, 'corta'],
   ['Puerta',               t => t.puerta,                  50,  4.6, 'corta'],
   ['Cliente',              t => t.cliente_nombre,          150, 10.5],
-  ['Ciudad',               t => t.cliente_ciudad,          82,  5.6],
-  ['Provincia',            t => t.cliente_provincia,       82,  5.6],
-  ['Dirección',            t => t.cliente_direccion,       130, 8.5],
+  ['Ciudad',               t => ciudadDe(t),               82,  5.6],
+  ['Provincia',            t => provinciaDe(t),            82,  5.6],
+  ['Dirección',            t => direccionDe(t),            130, 8.5],
   ['Teléfono',             t => t.cliente_telefono,        96,  6.2],
   ['Fecha Pedido',         t => fecha(t.fecha_pedido),     58,  4.6, 'corta'],
   ['Tipo  Servicio',       t => (t.tipo_servicio || '').toUpperCase(), 78, 5.4],
@@ -4381,16 +4533,37 @@ function anchosPlanilla(columnas, filas, disponible, tam) {
   }
 
   const sobra = disponible - suma;
-  const ganas = m.map((x, i) => dura[i] ? 0 : Math.max(0, x.comodo - x.minimo));
+  /* Observaciones es la columna más importante de la hoja: se lleva una parte
+     mayor del espacio que sobra, multiplicando su "gana" frente al resto de
+     las columnas blandas (cliente, dirección, etc.). */
+  const PESO_OBSERVACIONES = 3;
+  const ganas = m.map((x, i) => {
+    if (dura[i]) return 0;
+    const g = Math.max(0, x.comodo - x.minimo);
+    return columnas[i][0] === 'OBSERVACIONES' ? g * PESO_OBSERVACIONES : g;
+  });
   const totalGanas = ganas.reduce((a, b) => a + b, 0) || 1;
   return anchos.map((a, i) => a + sobra * (ganas[i] / totalGanas));
+}
+
+/** La letra más grande con la que las 17 columnas entran en la hoja sin que
+    se corte ninguna palabra (mismo criterio que la "holgura" de abajo). */
+function tamañoRecomendado(paradas) {
+  for (let t = 16; t >= 9; t--) {
+    const suma = COLS_HOJA.reduce((a, [rot, val]) =>
+      a + medidasColumna(rot, paradas.map(f => val(f)), t, rot === 'OBSERVACIONES').minimo, 0);
+    if (suma <= 1072) return t;
+  }
+  return 9;
 }
 
 function HojaRuta({ gira, paradas, alCerrar }) {
   const s = useS();
   const [corte, setCorte] = useState('');   // '' | dia | tecnico
-  const [tam, setTam] = useState(14);       // tamaño de letra de la planilla (pedido: 14)
+  const recomendado = useMemo(() => tamañoRecomendado(paradas), [paradas]);
+  const [tam, setTam] = useState(recomendado);   // tamaño de letra de la planilla
   const tec = s.tecnicos.find(t => t.id === gira.tecnico_id);
+  const tec2 = s.tecnicos.find(t => t.id === gira.tecnico2_id);
   useEffect(() => {
     document.body.classList.add('imprimiendo');
     return () => document.body.classList.remove('imprimiendo');
@@ -4436,7 +4609,8 @@ function HojaRuta({ gira, paradas, alCerrar }) {
           alCambiar=${v => setCorte(v || '')} />
         <span class="mini">separar por…</span>
         <select style="width:auto" value=${tam} onChange=${e => setTam(Number(e.target.value))}>
-          ${[16, 15, 14, 13, 12, 11, 10, 9].map(n => html`<option value=${n}>Letra ${n}</option>`)}
+          ${[16, 15, 14, 13, 12, 11, 10, 9].map(n => html`<option value=${n}>Letra ${n}${
+            n === recomendado ? ' (recomendada)' : ''}</option>`)}
         </select>
         ${holgura < -20 && html`<span class="mini" style="color:var(--alerta)"
           title="Las 17 columnas entran siempre en el ancho de la hoja; con letra muy grande alguna palabra larga se parte en dos renglones.">
@@ -4454,7 +4628,8 @@ function HojaRuta({ gira, paradas, alCerrar }) {
             <div class="mini">Semana del ${fecha(gira.fecha_desde, 1)}${gira.fecha_hasta ? ' al ' + fecha(gira.fecha_hasta, 1) : ''}</div>
           </div>
           <div class="mini der">
-            <div><b>Técnico:</b> ${tec ? tec.nombre : '—'}</div>
+            <div><b>Técnico${tec2 ? ' 1' : ''}:</b> ${tec ? tec.nombre : '—'}</div>
+            ${tec2 && html`<div><b>Técnico 2:</b> ${tec2.nombre}</div>`}
             <div><b>Vehículo:</b> ${gira.vehiculo || '—'}</div>
             <div><b>Viáticos entregados:</b> ${plata(gira.viaticos) || '—'}</div>
           </div>
@@ -4877,13 +5052,25 @@ function CampoGrilla({ valor, onGuardar, ancho, titulo, area, numero, placeholde
 
 function Cobranza() {
   const s = useS();
-  const [vista, setVista] = useState('a_cobrar');  // a_cobrar | a_facturar | sin_cerrar | todo | todos_registros
+  const [vista, setVista] = useState('a_cobrar');  // a_cobrar | facturado_en_curso | sin_cerrar | todo | todos_registros
   const [busca, setBusca] = useState('');
   const [anio, setAnio] = useState('');
   const [mes, setMes] = useState('');
   const [fichaId, setFichaId] = useState(null);
   const [tope, setTope] = useState(400);
+  const [verLeyenda, setVerLeyenda] = useState(false);
   useEffect(() => { setTope(400); }, [vista, busca, anio, mes]);
+  /* El caso desde el que se llegó por "Abrir este trabajo en Cobranza →" (en
+     el Registro de Service) queda resaltado en la grilla, no sólo abierto en
+     la ficha: así no se pierde de vista entre el resto de los registros. Se
+     desmarca solo apenas se cambia de vista o de búsqueda a propósito. */
+  const [destacado, setDestacado] = useState(null);
+  const filaDestacadaRef = useRef(null);
+  useEffect(() => {
+    if (destacado && filaDestacadaRef.current) {
+      filaDestacadaRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }, [destacado]);
   /* Selección de casos para armar la tabla que se manda a facturar. No se
      limpia sola al cambiar de vista o de búsqueda: la idea es poder ir
      buscando distintos clientes o pasando de una vista a otra y sumando
@@ -4908,6 +5095,7 @@ function Cobranza() {
     if (!t) return;
     setVista('todos_registros'); setBusca(t.cliente_nombre || t.n_llamada || ''); setAnio(''); setMes('');
     setFichaId(t.id);
+    setDestacado(t.id);
   }, [s.irACobranza]);
   const [orden, setOrden] = useState({ campo: 'fecha_factura', asc: true });
   const editable = puedeCobranza();
@@ -4921,11 +5109,15 @@ function Cobranza() {
     && (['EN CURSO', 'SI'].includes(t.facturado) || t.factura_solicitada
         || Number(t.precio_sin_iva) > 0);
 
+  /* "Pendiente de facturar" se sacó: en la práctica nunca marcaba ningún caso
+     aparte, y lo que pretendía mostrar ya lo cubre "Cumplidos sin cerrar". En
+     su lugar queda esta vista, más puntual: lo que YA se mandó a facturar
+     (facturado EN CURSO) pero todavía no está cobrado ni tiene fecha de pago. */
   const base = useMemo(() => s.trabajos.filter(t => {
     if (vista === 'sin_cerrar') return estaAbierto(t) && !cobradoEnMano(t);
     if (vista === 'a_cobrar') return enCirculo(t) && !CERRADO_COBRO.includes(t.cobrado);
-    if (vista === 'a_facturar') return (['EN CURSO', 'SIN DATOS'].includes(t.facturado)
-      || (t.factura_solicitada && !t.fecha_factura)) && Number(t.precio_sin_iva) > 0;
+    if (vista === 'facturado_en_curso') return t.facturado === 'EN CURSO'
+      && !CERRADO_COBRO.includes(t.cobrado) && !t.fecha_pago;
     if (vista === 'todos_registros') return true;
     return enCirculo(t);
   }), [s.trabajos, vista]);
@@ -4933,7 +5125,7 @@ function Cobranza() {
   const filtrados = useMemo(() => {
     const f = sinAcentos(busca);
     return ordenar(base.filter(t => {
-      const ref = String(t.fecha_factura || t.fecha_estado || t.fecha_visita || '');
+      const ref = String(t.fecha_factura || t.fecha_visita || '');
       if (anio && ref.slice(0, 4) !== anio) return false;
       if (mes && ref.slice(5, 7) !== mes) return false;
       return !f || sinAcentos([t.cliente_nombre, t.n_serie, t.concepto, t.n_llamada, t.cliente_cuit,
@@ -4942,14 +5134,14 @@ function Cobranza() {
   }, [base, busca, anio, mes, orden]);
 
   const anios = useMemo(() => [...new Set(s.trabajos
-    .map(t => String(t.fecha_factura || t.fecha_estado || t.fecha_visita || '').slice(0, 4))
+    .map(t => String(t.fecha_factura || t.fecha_visita || '').slice(0, 4))
     .filter(Boolean))].sort().reverse(), [s.trabajos]);
   const MESES_OPC = MESES.map((m, i) => ({ v: String(i + 1).padStart(2, '0'), r: m }));
 
   const total = filtrados.reduce((a, t) => a + (Number(t.precio_sin_iva) || 0), 0);
   const totalConIva = filtrados.reduce((a, t) => a + (Number(t.precio_sin_iva) || 0) * (1 + ivaDe(t) / 100), 0);
   const dias = t => {
-    const ref = t.fecha_factura || t.fecha_estado;
+    const ref = t.fecha_factura || t.fecha_visita;
     if (!ref) return null;
     return Math.round((Date.now() - new Date(ref + 'T12:00:00')) / 86400000);
   };
@@ -5033,7 +5225,7 @@ function Cobranza() {
      están en la vista elegida: si mirara la lista filtrada, "lo que está en
      curso" nunca aparecería, porque todavía no entró al circuito de cobro. */
   const universo = useMemo(() => s.trabajos.filter(t => {
-    const ref = String(t.fecha_factura || t.fecha_estado || t.fecha_visita || '');
+    const ref = String(t.fecha_factura || t.fecha_visita || '');
     if (anio && ref.slice(0, 4) !== anio) return false;
     if (mes && ref.slice(5, 7) !== mes) return false;
     return true;
@@ -5046,14 +5238,16 @@ function Cobranza() {
     <${SituacionCasos} trabajos=${universo} verMontos=${verMontos} periodo=${rotuloPeriodo} />
     <div class="panel" style="margin-bottom:10px">
       <div class="panel-cab">
-        ${[['a_cobrar', 'Pendientes de cobro'], ['a_facturar', 'Pendientes de facturar'],
+        ${[['a_cobrar', 'Pendientes de cobro'],
+           ['facturado_en_curso', `Facturado en curso, sin cobrar (${
+             s.trabajos.filter(t => t.facturado === 'EN CURSO' && !CERRADO_COBRO.includes(t.cobrado) && !t.fecha_pago).length})`],
            ['sin_cerrar', `Cumplidos sin cerrar (${s.trabajos.filter(estaAbierto).length})`],
            ['todo', 'Todo lo facturable'],
            ['todos_registros', `Todos los registros (${s.trabajos.length})`]]
           .map(([k, r]) => html`<button class=${'btn chico ' + (vista === k ? '' : 'sec')}
-            onClick=${() => setVista(k)}>${r}</button>`)}
+            onClick=${() => { setVista(k); setDestacado(null); }}>${r}</button>`)}
         <input style="max-width:250px" placeholder="Buscar cliente, concepto, CUIT…" value=${busca}
-          onInput=${e => setBusca(e.target.value)} />
+          onInput=${e => { setBusca(e.target.value); setDestacado(null); }} />
         <${Sel} valor=${anio} opts=${anios} vacio="Año: todos" alCambiar=${setAnio} />
         <select style="width:auto" value=${mes} onChange=${e => setMes(e.target.value)}
           title="Mes de la factura (o del trabajo, si todavía no se facturó)">
@@ -5066,6 +5260,8 @@ function Cobranza() {
           ${editable && html`<button class="btn chico" disabled=${!seleccion.size}
             title="Arma una tabla con los datos para facturar los casos tildados en la grilla"
             onClick=${() => setVerFacturar(true)}>Armar tabla para facturar${seleccion.size ? ` (${seleccion.size})` : ''}</button>`}
+          <button class="btn sec chico" title="Qué significa cada color y cada etiqueta"
+            onClick=${() => setVerLeyenda(true)}>Referencias</button>
           <button class="btn sec chico" onClick=${() => bajarCSV('cobranza', cols, filtrados)}>Exportar</button>
           <button class="btn sec chico" onClick=${() => window.print()}>Imprimir</button>
         </div>
@@ -5117,7 +5313,10 @@ function Cobranza() {
           <th>Observaciones</th>
         </tr></thead>
         <tbody>
-          ${filtrados.slice(0, tope).map(t => html`<tr key=${t.id} class=${seleccion.has(t.id) ? 'marcado' : ''}>
+          ${filtrados.slice(0, tope).map(t => html`<tr key=${t.id}
+            ref=${String(destacado) === String(t.id) ? filaDestacadaRef : null}
+            class=${[seleccion.has(t.id) ? 'marcado' : '',
+                     String(destacado) === String(t.id) ? 'desde-service' : ''].filter(Boolean).join(' ')}>
             ${editable && html`<td class="no-imprimir">
               <input type="checkbox" style="width:auto" checked=${seleccion.has(t.id)}
                 onChange=${() => alternarSeleccion(t.id)} /></td>`}
@@ -5209,6 +5408,7 @@ function Cobranza() {
     </div>
     ${fichaId && html`<${Ficha} id=${fichaId} alCerrar=${() => setFichaId(null)} />`}
     ${verFacturar && html`<${TablaFacturar} trabajos=${seleccionados} alCerrar=${() => setVerFacturar(false)} />`}
+    ${verLeyenda && html`<${Leyenda} alCerrar=${() => setVerLeyenda(false)} />`}
   </div>`;
 }
 
@@ -5308,7 +5508,7 @@ function Encuestas() {
   const [mes, setMes] = useState('');
   const [tecnico, setTecnico] = useState('');
   const [estadoEnc, setEstadoEnc] = useState('pendientes');   // pendientes | enviadas | todas
-  const [orden, setOrden] = useState({ campo: 'fecha_estado', asc: false });
+  const [orden, setOrden] = useState({ campo: 'fecha_visita', asc: false });
   const [fichaId, setFichaId] = useState(null);
   const [tope, setTope] = useState(300);
   const caja = useRef(null);
@@ -5318,7 +5518,7 @@ function Encuestas() {
   const hechos = useMemo(() => s.trabajos.filter(t => t.estado === 'CUMPLIDO'), [s.trabajos]);
 
   const anios = useMemo(() => [...new Set(hechos
-    .map(t => String(t.fecha_estado || t.fecha_visita || '').slice(0, 4)).filter(Boolean))]
+    .map(t => String(t.fecha_visita || '').slice(0, 4)).filter(Boolean))]
     .sort().reverse(), [hechos]);
   const MESES_OPC = MESES.map((m, i) => ({ v: String(i + 1).padStart(2, '0'),
     r: m[0].toUpperCase() + m.slice(1) }));
@@ -5328,12 +5528,12 @@ function Encuestas() {
   const delPeriodo = useMemo(() => {
     const f = sinAcentos(busca);
     return hechos.filter(t => {
-      const d = String(t.fecha_estado || t.fecha_visita || '');
+      const d = String(t.fecha_visita || '');
       if (anio && d.slice(0, 4) !== anio) return false;
       if (mes && d.slice(5, 7) !== mes) return false;
       if (tecnico && !(t.tecnicos || '').includes(tecnico)) return false;
       return !f || sinAcentos([t.n_llamada, t.cliente_nombre, t.n_serie, t.modelo,
-        t.cliente_ciudad, t.cliente_provincia, t.tipo_pedido, t.tipo_servicio,
+        ciudadDe(t), provinciaDe(t), t.tipo_pedido, t.tipo_servicio,
         t.tecnicos].join(' ')).includes(f);
     });
   }, [hechos, busca, anio, mes, tecnico]);
@@ -5380,7 +5580,7 @@ function Encuestas() {
     { rot: 'Ciudad y provincia', val: t => ubicacion(t) },
     { rot: 'Servicio', val: t => t.tipo_servicio },
     { rot: 'Estado', val: t => t.estado },
-    { rot: 'Fecha del trabajo', val: t => fecha(t.fecha_estado, 1) },
+    { rot: 'Fecha del trabajo', val: t => fecha(t.fecha_visita, 1) },
     { rot: 'Técnico', val: t => t.tecnicos },
     { rot: 'Encuesta enviada', val: t => t.encuesta_enviada ? 'SI' : 'NO' },
     { rot: 'Fecha de envío', val: t => fecha(t.fecha_encuesta, 1) },
@@ -5395,7 +5595,7 @@ function Encuestas() {
         { nombre: 'Encuestas',
           columnas: COLS.map(c => c.rot),
           filas: filtrados.map(t => COLS.map(c => {
-            if (c.rot === 'Fecha del trabajo') return t.fecha_estado ? { f: t.fecha_estado } : null;
+            if (c.rot === 'Fecha del trabajo') return t.fecha_visita ? { f: t.fecha_visita } : null;
             if (c.rot === 'Fecha de envío') return t.fecha_encuesta ? { f: t.fecha_encuesta } : null;
             const v = c.val(t); return v === undefined || v === '' ? null : v;
           })) },
@@ -5468,7 +5668,7 @@ function Encuestas() {
           <${Th} campo="cliente_ciudad" rot="Ciudad y provincia" orden=${orden} setOrden=${setOrden} ancho=${170} />
           <${Th} campo="tipo_servicio" rot="Servicio" orden=${orden} setOrden=${setOrden} />
           <${Th} campo="estado" rot="Estado" orden=${orden} setOrden=${setOrden} />
-          <${Th} campo="fecha_estado" rot="Fecha" orden=${orden} setOrden=${setOrden} />
+          <${Th} campo="fecha_visita" rot="Fecha" orden=${orden} setOrden=${setOrden} />
           <${Th} campo="tecnicos" rot="Técnico" orden=${orden} setOrden=${setOrden} ancho=${150} />
           <th class="col-encuesta" style="min-width:150px">Encuesta enviada</th>
         </tr></thead>
@@ -5483,7 +5683,7 @@ function Encuestas() {
             <td title=${ubicacion(t)}>${ubicacion(t)}</td>
             <td>${t.tipo_servicio || ''}</td>
             <td><${Et} txt=${t.estado} mapa=${COLOR_ESTADO} /></td>
-            <td>${fecha(t.fecha_estado)}</td>
+            <td>${fecha(t.fecha_visita)}</td>
             <td title=${t.tecnicos}>${t.tecnicos || ''}</td>
             <td class="col-encuesta">
               <label class="fila" style="gap:7px;cursor:${editable ? 'pointer' : 'default'};flex-wrap:nowrap">
@@ -5639,7 +5839,7 @@ function imprimirProductividad() {
 
 /** el mes de un trabajo, para la liquidación: la fecha en que se dio por hecho */
 function periodoDe(t) {
-  return String(t.fecha_estado || t.fecha_visita || '').slice(0, 7);
+  return String(t.fecha_visita || '').slice(0, 7);
 }
 
 /* ---------------------------------------------------------------------
@@ -5731,7 +5931,7 @@ function Productividad() {
     const services = [];
     for (const t of s.trabajos) {
       if (t.estado !== 'CUMPLIDO') continue;
-      const d = t.fecha_estado || t.fecha_visita;
+      const d = t.fecha_visita;
       if (!d) continue;
       if (catDe(t.tipo_pedido) !== 'service') continue;
       services.push({ id: t.id, d: String(d).slice(0, 10), ids: t.tecnico_ids || [] });
@@ -5778,7 +5978,7 @@ function Productividad() {
      llegado el técnico ese día: los services de esa misma semana hechos hasta
      esa fecha, y nunca menos de 1. */
   const numeroEnLaSemana = useCallback((t, categoria) => {
-    const d = String(t.fecha_estado || t.fecha_visita || hoy).slice(0, 10);
+    const d = String(t.fecha_visita || hoy).slice(0, 10);
     if (categoria === 'service') {
       return semanaDelTecnico.numero.get(String(tecActual) + '|' + t.id) || 1;
     }
@@ -5800,7 +6000,7 @@ function Productividad() {
   /* ---- las filas de la planilla ---- */
   const filas = useMemo(() => delMes
     .filter(t => (t.tecnico_ids || []).some(id => String(id) === String(tecActual)))
-    .sort((a, b) => String(a.fecha_estado || '').localeCompare(String(b.fecha_estado || ''))
+    .sort((a, b) => String(a.fecha_visita || '').localeCompare(String(b.fecha_visita || ''))
       || Number(a.id) - Number(b.id))
     .map(t => {
       const it = itemDe(t.id);
@@ -5810,8 +6010,8 @@ function Productividad() {
         ? Number(it.minutos) : minutosAuto;
       /* el tramo sale del lugar que ocupa esta fila en su semana, no del mes
          ni del total de la semana: es escalonado */
-      const lunes = lunesDe(t.fecha_estado || t.fecha_visita || hoy);
-      const nSem = servicesDeLaSemana(t.fecha_estado || t.fecha_visita);
+      const lunes = lunesDe(t.fecha_visita || hoy);
+      const nSem = servicesDeLaSemana(t.fecha_visita);
       const orden = numeroEnLaSemana(t, categoria);
       const tramo = tramoDe(orden);
       /* Service y Service Proactivo: el valor del tramo, tal cual.
@@ -5906,7 +6106,7 @@ function Productividad() {
     ['Fecha pedido', f => fecha(f.t.fecha_pedido, 1)],
     ['Tipo servicio', f => (f.t.tipo_servicio || '').toUpperCase()],
     ['Estado', f => f.t.estado || ''],
-    ['Fecha de estado', f => fecha(f.t.fecha_estado, 1)],
+    ['Fecha de visita', f => fecha(f.t.fecha_visita, 1)],
     ['Técnico', f => f.t.tecnicos || ''],
     ['Tiempos MO [Min]', f => f.minutos || 0],
     ['Pago', f => Number(f.pago) || 0],
@@ -6018,7 +6218,7 @@ function Productividad() {
           <th class="p-fecha">Fecha<br />pedido</th>
           <th class="p-serv">Tipo<br />servicio</th>
           <th class="p-estado">Estado</th>
-          <th class="p-fecha">Fecha de<br />estado</th>
+          <th class="p-fecha">Fecha de<br />visita</th>
           <th class="p-tec">Técnico</th>
           <th class="der p-min">Tiempos MO<br />[Min]</th>
           <th class="der p-pago">Pago</th>
@@ -6035,7 +6235,7 @@ function Productividad() {
             <td class="der">${fecha(f.t.fecha_pedido)}</td>
             <td>${(f.t.tipo_servicio || '').toUpperCase()}</td>
             <td><${Et} txt=${f.t.estado} mapa=${COLOR_ESTADO} /></td>
-            <td class="der">${fecha(f.t.fecha_estado)}</td>
+            <td class="der">${fecha(f.t.fecha_visita)}</td>
             <td>${f.t.tecnicos}</td>
             <td class="num p-min">
               <input type="number" step="1" value=${f.minutos}
@@ -6683,7 +6883,7 @@ function Medidor({ rot, parte, total, tono = 1, detalle }) {
    ===================================================================== */
 function Tablero() {
   const s = useS();
-  const anios = useMemo(() => [...new Set(s.trabajos.map(t => String(t.fecha_estado || '').slice(0, 4))
+  const anios = useMemo(() => [...new Set(s.trabajos.map(t => String(t.fecha_visita || '').slice(0, 4))
     .filter(a => a.length === 4))].sort().reverse(), [s.trabajos]);
   const [anio, setAnio] = useState(() => String(new Date().getFullYear()));
   /* Carga (Mateo) entra al tablero para ver cómo viene el trabajo, pero no la
@@ -6691,7 +6891,7 @@ function Tablero() {
   const verPlata = puedeMontos();
 
   const delAnio = useMemo(() => s.trabajos.filter(t =>
-    String(t.fecha_estado || '').slice(0, 4) === anio), [s.trabajos, anio]);
+    String(t.fecha_visita || '').slice(0, 4) === anio), [s.trabajos, anio]);
 
   const cuenta = (lista, clave) => {
     const m = new Map();
@@ -6717,7 +6917,7 @@ function Tablero() {
     const m = new Map();
     for (let i = 1; i <= hastaMes; i++) m.set(String(i).padStart(2, '0'), 0);
     delAnio.forEach(t => {
-      const k = String(t.fecha_estado).slice(5, 7);
+      const k = String(t.fecha_visita).slice(5, 7);
       if (m.has(k)) m.set(k, m.get(k) + valor(t));
     });
     return [...m.entries()].map(([k, v]) => [MESES[Number(k) - 1], v]);
@@ -6739,7 +6939,7 @@ function Tablero() {
   const calor = useMemo(() => {
     const m = new Map();
     delAnio.forEach(t => {
-      const mes = MESES[Number(String(t.fecha_estado).slice(5, 7)) - 1];
+      const mes = MESES[Number(String(t.fecha_visita).slice(5, 7)) - 1];
       (t.tecnicos || '').split(' / ').filter(Boolean).forEach(n =>
         m.set(n + '|' + mes, (m.get(n + '|' + mes) || 0) + 1));
     });
@@ -6756,7 +6956,7 @@ function Tablero() {
   const provincias = useMemo(() => {
     const m = new Map(), raras = new Map();
     for (const t of delAnio) {
-      const bruto = t.cliente_provincia;
+      const bruto = provinciaDe(t);
       if (!bruto || !String(bruto).trim()) continue;
       const p = normalizarProvincia(bruto);
       if (provinciaDesconocida(bruto)) raras.set(p, (raras.get(p) || 0) + 1);
@@ -6772,7 +6972,7 @@ function Tablero() {
      observaciones del servicio cuentan las fallas y los comentarios internos
      cuentan lo que se hizo para arreglarlas. */
   const rotuloDe = t => [t.n_llamada || '#' + t.id, t.n_serie, t.cliente_nombre,
-    fecha(t.fecha_estado)].filter(Boolean).join(' · ');
+    fecha(t.fecha_visita)].filter(Boolean).join(' · ');
   const textosFalla = useMemo(() => delAnio
     .filter(t => (t.obs_servicio || '').trim())
     .map(t => ({ id: t.id, rot: rotuloDe(t), txt: t.obs_servicio })), [delAnio]);
@@ -6789,7 +6989,7 @@ function Tablero() {
     const nombres = [...top, 'Otros'];
     const series = nombres.map(rot => ({ rot, valores: new Array(hastaMes).fill(0) }));
     for (const t of delAnio) {
-      const mes = Number(String(t.fecha_estado).slice(5, 7));
+      const mes = Number(String(t.fecha_visita).slice(5, 7));
       if (!(mes >= 1 && mes <= hastaMes)) continue;
       const i = top.indexOf(t.tipo_pedido);
       series[i >= 0 ? i : nombres.length - 1].valores[mes - 1]++;
@@ -6805,7 +7005,7 @@ function Tablero() {
   const garantias = delAnio.filter(t => (t.tipo_pedido || '').startsWith('Garantía')).length;
   const sinCerrar = s.trabajos.filter(estaAbierto).length;
   const mesActual = hoyISO().slice(0, 7);
-  const delMes = s.trabajos.filter(t => String(t.fecha_estado || '').slice(0, 7) === mesActual);
+  const delMes = s.trabajos.filter(t => String(t.fecha_visita || '').slice(0, 7) === mesActual);
   const equiposAtendidos = new Set(delAnio.map(t => t.n_serie).filter(Boolean)).size;
 
   const cobranza = useMemo(() => opciones('cobrado').map(o => {
@@ -6983,7 +7183,7 @@ function Cartera() {
       const v = m.get(t.cliente_id) || { n: 0, ultimo: '', monto: 0, aCobrar: 0 };
       v.n++; v.monto += Number(t.precio_sin_iva) || 0;
       if (t.cobrado === 'NO') v.aCobrar += Number(t.precio_sin_iva) || 0;
-      if ((t.fecha_estado || '') > v.ultimo) v.ultimo = t.fecha_estado || '';
+      if ((t.fecha_visita || '') > v.ultimo) v.ultimo = t.fecha_visita || '';
       m.set(t.cliente_id, v);
     });
     return m;
@@ -6996,7 +7196,7 @@ function Cartera() {
       const v = m.get(t.equipo_id) || { n: 0, ultimo: '', garantias: 0, horas: 0 };
       v.n++; v.horas += Number(t.horas_mo) || 0;
       if ((t.tipo_pedido || '').startsWith('Garantía')) v.garantias++;
-      if ((t.fecha_estado || '') > v.ultimo) v.ultimo = t.fecha_estado || '';
+      if ((t.fecha_visita || '') > v.ultimo) v.ultimo = t.fecha_visita || '';
       m.set(t.equipo_id, v);
     });
     return m;
@@ -7270,7 +7470,7 @@ function EditarCliente({ c, alCerrar, alAbrirTrabajo }) {
   const editable = puedeMaestros();
   const set2 = (k, v) => setB(x => ({ ...x, [k]: v }));
   const trabajos = s.trabajos.filter(t => t.cliente_id === c.id)
-    .sort((x, y) => String(y.fecha_estado || '').localeCompare(String(x.fecha_estado || '')));
+    .sort((x, y) => String(y.fecha_visita || '').localeCompare(String(x.fecha_visita || '')));
   const equipos = s.equipos.filter(e => e.cliente_id === c.id);
 
   async function guardar() {
@@ -7310,7 +7510,7 @@ function EditarCliente({ c, alCerrar, alAbrirTrabajo }) {
       <div class="linea-tiempo">
         ${trabajos.slice(0, 12).map(t => html`<div class="ev" style="cursor:pointer"
           onClick=${() => { alCerrar(); alAbrirTrabajo(t.id); }}>
-          <b>${fecha(t.fecha_estado, 1)}</b> · ${t.n_serie || ''} · ${t.tipo_servicio || ''} ·
+          <b>${fecha(t.fecha_visita, 1)}</b> · ${t.n_serie || ''} · ${t.tipo_servicio || ''} ·
           ${plata(t.precio_sin_iva)} <${Et} txt=${t.cobrado} mapa=${COLOR_COBRO} /></div>`)}
         ${!trabajos.length && html`<div class="mini">Sin trabajos registrados.</div>`}
       </div></div>`}
@@ -7338,7 +7538,7 @@ function EditarEquipo({ e, alCerrar, alAbrirTrabajo }) {
   const editable = puedeMaestros();
   const set2 = (k, v) => setB(x => ({ ...x, [k]: v }));
   const trabajos = s.trabajos.filter(t => t.equipo_id === e.id)
-    .sort((x, y) => String(y.fecha_estado || '').localeCompare(String(x.fecha_estado || '')));
+    .sort((x, y) => String(y.fecha_visita || '').localeCompare(String(x.fecha_visita || '')));
   const cli = s.clientes.find(c => c.id === b.cliente_id);
 
   async function guardar() {
@@ -7433,12 +7633,12 @@ function Admin() {
   /* Resumen por técnico: cantidad de trabajos y horas de mano de obra,
      ordenado del que más trabajos hizo al que menos. */
   const aniosTec = useMemo(() => [...new Set(s.trabajos
-    .map(t => String(t.fecha_estado || t.fecha_visita || '').slice(0, 4)).filter(Boolean))]
+    .map(t => String(t.fecha_visita || '').slice(0, 4)).filter(Boolean))]
     .sort().reverse(), [s.trabajos]);
 
   const resumenTec = useMemo(() => {
     const delAnio = anioTec
-      ? s.trabajos.filter(t => String(t.fecha_estado || t.fecha_visita || '').slice(0, 4) === anioTec)
+      ? s.trabajos.filter(t => String(t.fecha_visita || '').slice(0, 4) === anioTec)
       : s.trabajos;
     return s.tecnicos.map(t => {
       // el trabajo puede tener varios técnicos: cuenta para todos los que participaron
@@ -7500,6 +7700,23 @@ function Admin() {
     const r = await actualizarYComprobar('tecnicos', t.id, { activo });
     if (!r.ok) return toast(r.msg, 'error');
     set({ tecnicos: S.tecnicos.map(x => x.id === t.id ? { ...x, activo } : x) });
+  }
+  /* Borrar un técnico borra en cascada su asignación en trabajo_tecnicos: si
+     tiene trabajos o giras en el historial, se pierde ese antecedente. Por
+     eso se bloquea acá y se sugiere desactivarlo en su lugar. */
+  async function eliminarTecnico(t) {
+    const enTrabajos = s.trabajos.some(x => (x.tecnico_ids || []).includes(t.id));
+    const enGiras = s.giras.some(g => g.tecnico_id === t.id || g.tecnico2_id === t.id);
+    if (enTrabajos || enGiras) {
+      return toast(`No se puede eliminar a ${t.nombre}: tiene trabajos o giras en el historial. `
+        + 'Desactivalo con el tilde de "Activo" en lugar de eliminarlo.', 'error');
+    }
+    if (!confirm(`¿Eliminar a ${t.nombre}? No tiene trabajos ni giras asignadas, así que no se pierde `
+      + 'ningún antecedente. Esta acción no se puede deshacer.\n\n¿Continuar?')) return;
+    const { error } = await cliente().from('tecnicos').delete().eq('id', t.id);
+    if (error) return toast('No se pudo eliminar: ' + error.message, 'error');
+    set({ tecnicos: S.tecnicos.filter(x => x.id !== t.id) });
+    toast(`${t.nombre} eliminado`, 'ok');
   }
   async function agregarValor() {
     if (!nuevoVal.trim()) return;
@@ -7638,7 +7855,8 @@ function Admin() {
         <table class="grilla">
           <thead><tr><th style="width:62px">Activo</th><th>Técnico</th>
             <th class="der">Trabajos</th><th class="der">Cumplidos</th>
-            <th class="der">Horas de trabajo</th><th class="der">Horas promedio</th></tr></thead>
+            <th class="der">Horas de trabajo</th><th class="der">Horas promedio</th>
+            ${admin && html`<th></th>`}</tr></thead>
           <tbody>${resumenTec.map(r => html`<tr key=${r.id} class=${r.activo ? '' : 'inactivo'}>
             <td><input type="checkbox" style="width:auto" disabled=${!puedePrecios()} checked=${r.activo}
               title=${r.activo ? 'Activo: aparece en las listas' : 'Inactivo: no aparece para asignar trabajos'}
@@ -7648,6 +7866,8 @@ function Admin() {
             <td class="num">${r.cumplidos.toLocaleString('es-AR')}</td>
             <td class="num">${r.horas.toLocaleString('es-AR', { maximumFractionDigits: 1 })}</td>
             <td class="num">${r.promedio ? r.promedio.toLocaleString('es-AR', { maximumFractionDigits: 1 }) : ''}</td>
+            ${admin && html`<td><button class="btn sec chico" title="Eliminar técnico"
+              onClick=${() => eliminarTecnico(r)}>✕</button></td>`}
           </tr>`)}</tbody>
           <tfoot><tr>
             <td></td>
@@ -7657,6 +7877,7 @@ function Admin() {
             <td class="num"><b>${resumenTec.reduce((a, r) => a + r.horas, 0)
               .toLocaleString('es-AR', { maximumFractionDigits: 1 })}</b></td>
             <td></td>
+            ${admin && html`<td></td>`}
           </tr></tfoot>
         </table>
       </div>
