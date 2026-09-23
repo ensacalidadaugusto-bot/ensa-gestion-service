@@ -53,7 +53,19 @@
   --fila-cobrar:#fdfcf7;   --fila-cobrar-h:#f7f2e3;
   --fila-brillo:#fde68a;
   --sombra:0 1px 3px rgba(16,32,48,.10), 0 6px 20px rgba(16,32,48,.06);
-  --radio:8px; --alto-barra:52px;
+  --radio:12px; --alto-barra:52px;
+  /* ---- neumorfismo mate ----
+     Paneles, botones y campos se ven tallados en el mismo fondo de la
+     pantalla: una luz suave arriba a la izquierda y una sombra suave abajo
+     a la derecha, sin brillo ni degradé (por eso "mate"). --neu-alto es el
+     relieve de lo que sobresale (paneles, botones sueltos); --neu-hondo es
+     el hundido de lo que se "aprieta" (campos de carga, botón presionado).
+     Las tablas de datos quedan afuera a propósito: con 17 columnas el bajo
+     contraste del neumorfismo complica leerlas de un vistazo. */
+  --neu-luz:rgba(255,255,255,.85); --neu-sombra:rgba(158,174,196,.55);
+  --neu-alto:7px 7px 16px var(--neu-sombra), -7px -7px 16px var(--neu-luz);
+  --neu-alto-chico:3px 3px 7px var(--neu-sombra), -3px -3px 7px var(--neu-luz);
+  --neu-hondo:inset 3px 3px 6px var(--neu-sombra), inset -3px -3px 6px var(--neu-luz);
 
   /* --- colores de los gráficos del tablero ---
      Los cinco tonos están validados: se distinguen entre sí también para
@@ -101,6 +113,13 @@ html[data-tema="oscuro"]{
   --fila-cobrar:#1d1a15;   --fila-cobrar-h:#26221a;
   --fila-brillo:#5c4a15;
   --sombra:0 1px 3px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.3);
+  /* mismo criterio del neumorfismo mate, resuelto sobre fondo oscuro: la
+     "luz" es apenas un gris más claro que el fondo (el blanco puro se ve
+     como un brillo, no como relieve mate) y la sombra es negro suave */
+  --neu-luz:rgba(255,255,255,.05); --neu-sombra:rgba(0,0,0,.6);
+  --neu-alto:7px 7px 16px var(--neu-sombra), -7px -7px 16px var(--neu-luz);
+  --neu-alto-chico:3px 3px 7px var(--neu-sombra), -3px -3px 7px var(--neu-luz);
+  --neu-hondo:inset 3px 3px 6px var(--neu-sombra), inset -3px -3px 6px var(--neu-luz);
   /* los mismos cinco tonos, re-elegidos para el fondo oscuro (no es un
      aclarado automático: cada uno se volvió a validar contra este fondo) */
   --sv-1:#3d86c9; --sv-2:#c9603a; --sv-3:#2a9a72; --sv-4:#a67d1c; --sv-5:#b56b95;
@@ -139,14 +158,22 @@ a{color:var(--acento)}
 .contenido{flex:1;overflow:auto;padding:12px}
 
 /* ---------- controles ---------- */
-.btn{background:var(--azul);color:#fff;border:0;border-radius:6px;padding:7px 13px;cursor:pointer;font-weight:500}
+/* Los botones sueltos (no los que van adentro de una tabla) llevan el
+   relieve mate: se ven salidos del fondo y, al tocarlos, se "hunden" un
+   instante — el mismo lenguaje que un botón físico. */
+.btn{background:var(--azul);color:#fff;border:0;border-radius:8px;padding:7px 13px;cursor:pointer;
+  font-weight:500;box-shadow:var(--neu-alto-chico);transition:box-shadow .1s,transform .1s}
 .btn:hover{background:var(--azul-osc)}
-.btn:disabled{opacity:.5;cursor:not-allowed}
-.btn.sec{background:var(--papel);color:var(--texto);border:1px solid var(--borde)}
+.btn:active:not(:disabled){box-shadow:var(--neu-hondo);transform:translateY(1px)}
+.btn:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
+.btn.sec{background:var(--papel);color:var(--texto);border:1px solid var(--borde-suave)}
 .btn.sec:hover{background:var(--gris)}
 .btn.peligro{background:var(--error)}
 .btn.chico{padding:4px 9px;font-size:12px}
-input,select,textarea{border:1px solid var(--borde);border-radius:6px;padding:6px 8px;background:var(--campo);width:100%}
+/* Los campos de carga van al revés: hundidos, como un hueco donde se
+   escribe. El foco (borde de acento) manda por sobre el relieve. */
+input,select,textarea{border:1px solid var(--borde);border-radius:8px;padding:6px 8px;background:var(--campo);
+  width:100%;box-shadow:var(--neu-hondo)}
 input:focus,select:focus,textarea:focus{outline:2px solid var(--acento);outline-offset:-1px;border-color:var(--acento)}
 textarea{resize:vertical;min-height:60px}
 label.campo{display:block;margin-bottom:9px}
@@ -155,7 +182,12 @@ label.campo>span{display:block;font-size:11px;color:var(--suave);margin-bottom:3
 .crece{flex:1;min-width:0}
 
 /* ---------- tarjetas ---------- */
-.panel{background:var(--papel);border:1px solid var(--borde);border-radius:var(--radio);box-shadow:var(--sombra);
+/* El panel es la superficie base del estilo mate: sale del fondo con el
+   mismo relieve que los botones, con un borde apenas visible (no se saca
+   del todo, para que el recuadro se distinga igual con pantallas o luz
+   ambiente que aplanen la sombra). */
+.panel{background:var(--papel);border:1px solid var(--borde-suave);border-radius:var(--radio);
+  box-shadow:var(--neu-alto);
   min-width:0}                       /* sin esto, una tabla ancha desborda su columna */
 /* Panel en rejilla: la tabla de adentro se desplaza sola en vez de pisar al vecino */
 .rejilla-paneles{display:grid;gap:10px;align-items:start;
@@ -387,9 +419,14 @@ body.esquina-ocupada .ficha-pie{padding-bottom:56px}
 body.esquina-ocupada .toast-caja{bottom:58px}
 .rejilla{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0 12px}
 .rejilla.dos{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
-fieldset{border:1px solid var(--borde);border-radius:var(--radio);padding:10px 12px;margin:0 0 12px}
+fieldset{border:1px solid var(--borde-suave);border-radius:var(--radio);padding:10px 12px;margin:0 0 12px;
+  box-shadow:var(--neu-alto-chico)}
 legend{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--acento);font-weight:700;padding:0 5px}
 .modal{position:fixed;inset:0;background:rgba(16,32,48,.4);z-index:60;display:flex;align-items:center;justify-content:center;padding:16px}
+/* La ventana modal flota sobre un fondo oscurecido, no sobre la pantalla:
+   ahí el relieve mate no tiene sentido (la luz y la sombra se calculan
+   contra el fondo de la app, no contra ese velo). Sigue con una sombra
+   de flotación común, como cualquier ventana que se superpone. */
 .modal .caja{background:var(--papel);border-radius:var(--radio);max-width:520px;width:100%;box-shadow:var(--sombra);max-height:90vh;overflow:auto}
 
 /* ---------- tablero ---------- */
