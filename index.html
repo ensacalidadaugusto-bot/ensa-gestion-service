@@ -259,6 +259,10 @@ table.grilla.registro tbody tr td:last-child{border-right:1px solid var(--borde)
 /* el canto de color según en qué anda el trabajo */
 table.grilla.registro tbody tr.tono-listo  {--canto:var(--ok)}
 table.grilla.registro tbody tr.tono-abierto{--canto:var(--error)}
+/* cerrado, pero con un pago viejo pendiente: ni "hecho" (verde) ni "urgente
+   por cerrar" (rojo) -- un tercer color, más discreto, para no confundirlo
+   con el trabajo que sí necesita atención hoy */
+table.grilla.registro tbody tr.tono-pendiente-cobranza{--canto:var(--alerta)}
 table.grilla.registro tbody tr.tono-hacer  {--canto:var(--fila-hacer-b)}
 table.grilla.registro tbody tr.tono-mirar  {--canto:var(--violeta)}
 table.grilla.registro tbody tr.tono-gris   {--canto:var(--borde)}
@@ -1417,7 +1421,16 @@ function soloFaltanObservaciones(t) {
   const f = faltaParaCerrar(t);
   return f.length === 1 && f[0] === 'cargar las observaciones del servicio';
 }
-function estaAbierto(t) { return t.estado === 'CUMPLIDO' && t.cierre !== 'CERRADO'; }
+/* "PENDIENTE COBRANZA": un tercer estado de cierre, además de ABIERTO y
+   CERRADO. Es para casos viejos que no se van a cobrar en lo inmediato:
+   saca al trabajo de la cola de "cumplidos sin cerrar" (ya no hace falta
+   seguir completando nada del lado del servicio), pero sin decir que se
+   cobró -- sigue apareciendo en "Pendientes de cobro", en Cobranza, hasta
+   que alguien lo marque como pagado. */
+const CIERRE_PENDIENTE_COBRANZA = 'PENDIENTE COBRANZA';
+function estaAbierto(t) {
+  return t.estado === 'CUMPLIDO' && t.cierre !== 'CERRADO' && t.cierre !== CIERRE_PENDIENTE_COBRANZA;
+}
 
 /* ---------------------------------------------------------------------
    EN QUÉ ANDA CADA CASO
@@ -1443,6 +1456,7 @@ function situacionDelCaso(t) {
   if (t.estado === 'CANCELA VISITA' || t.cobrado === 'CANCELADO') return 'Cancelado';
   if (ABIERTOS.includes(t.estado)) return 'En curso';
   if (t.cierre === 'CERRADO') return 'Cerrado';
+  if (t.cierre === CIERRE_PENDIENTE_COBRANZA) return 'Pendiente de cobro';
   return esperaCobro(t) ? 'Pendiente de cobro' : 'Abierto';
 }
 
@@ -1483,13 +1497,19 @@ function porHacer(t) { return t.estado === 'PENDIENTE' || t.estado === 'PROGRAMA
      gris   — cancelado */
 function tonoDeFila(t) {
   if (t.estado === 'CANCELA VISITA') return 'gris';
-  if (t.estado === 'CUMPLIDO') return t.cierre === 'CERRADO' ? 'listo' : 'abierto';
+  if (t.estado === 'CUMPLIDO') {
+    if (t.cierre === 'CERRADO') return 'listo';
+    if (t.cierre === CIERRE_PENDIENTE_COBRANZA) return 'pendiente-cobranza';
+    return 'abierto';
+  }
   if (porHacer(t)) return 'hacer';
   return 'mirar';
 }
 function cierreQueCorresponde(t) {
   if (t.estado !== 'CUMPLIDO') return null;
-  return t.cierre === 'CERRADO' ? 'CERRADO' : 'ABIERTO';
+  if (t.cierre === 'CERRADO') return 'CERRADO';
+  if (t.cierre === CIERRE_PENDIENTE_COBRANZA) return CIERRE_PENDIENTE_COBRANZA;
+  return 'ABIERTO';
 }
 /* ---------------------------------------------------------------------
    Regla de cierre automático
@@ -1500,7 +1520,9 @@ function cierreQueCorresponde(t) {
 function cierreAutomatico(cuerpo) {
   const c = { ...cuerpo };
   if (c.estado !== 'CUMPLIDO') { c.cierre = null; return c; }
-  if (c.cierre === 'CERRADO') return c;
+  // CERRADO y PENDIENTE COBRANZA son decisiones explícitas (los botones de
+  // cierre de la ficha): se respetan tal cual, no se recalculan solas.
+  if (c.cierre === 'CERRADO' || c.cierre === CIERRE_PENDIENTE_COBRANZA) return c;
   if (cobradoEnMano(c) && !faltaParaCerrar(c).length) { c.cierre = 'CERRADO'; return c; }
   c.cierre = 'ABIERTO';
   return c;
@@ -2711,6 +2733,8 @@ function MarcaCierre({ t }) {
   const c = cierreQueCorresponde(t);
   if (!c) return html`<span class="mini">—</span>`;
   if (c === 'CERRADO') return html`<span class="et verde">CERRADO</span>`;
+  if (c === CIERRE_PENDIENTE_COBRANZA) return html`<span class="et ambar"
+    title="Cerrado técnicamente; queda un pago pendiente por cobrar">PENDIENTE COBRANZA</span>`;
   const falta = faltaParaCerrar(t);
   return html`<span class="et alarma" title=${falta.length ? 'Falta ' + falta.join(' y ') : 'Listo para cerrar'}>
     ⚠ ABIERTO</span>`;
@@ -2734,6 +2758,7 @@ function Leyenda({ alCerrar }) {
   const TONOS = [
     ['ok', 'Listo', 'Cumplido y cerrado: no queda nada pendiente.'],
     ['error', 'Abierto', 'Cumplido pero todavía abierto administrativamente: falta definir la facturación y/o cargar las observaciones del servicio.'],
+    ['alerta', 'Pendiente cobranza', 'Cerrado técnicamente para no seguir persiguiéndolo, pero todavía tiene un pago viejo sin cobrar.'],
     ['fila-hacer-b', 'Por hacer', 'Pendiente o programado: todavía no se hizo la visita.'],
     ['violeta', 'A revisar', 'En revisión o a reprogramar.'],
     ['borde', 'Cancelado', 'Se canceló la visita.'],
@@ -2763,6 +2788,8 @@ function Leyenda({ alCerrar }) {
         'El trabajo ya está terminado también en lo administrativo: facturación definida y observaciones cargadas (o cobrado en efectivo).')}
       ${Fila(html`<span class="et alarma">⚠ ABIERTO</span>`, '',
         'Cumplido pero falta algo para cerrarlo del lado administrativo. Se ve también en Cobranza, en "Cumplidos sin cerrar".')}
+      ${Fila(html`<span class="et ambar">PENDIENTE COBRANZA</span>`, '',
+        'Un caso viejo que no se va a cobrar en lo inmediato: se sacó de "Cumplidos sin cerrar" para no seguir persiguiéndolo, pero sigue viéndose en "Pendientes de cobro" hasta que se marque como pagado.')}
     </fieldset>
     <fieldset><legend>Otras señales de esta grilla</legend>
       ${Fila(Swatch('error'), html`<b>Texto de toda la fila en rojo</b>`,
@@ -3152,7 +3179,7 @@ function Trabajos() {
           ${conFiltroFecha ? '📅 fechas ✓' : '📅 fechas'}</button>
         ${verPlata && html`<${Sel} valor=${f.cobrado} opts=${opciones('cobrado')} vacio="Cobrado: todos"
           alCambiar=${v => cambiar('cobrado', v)} />`}
-        ${verPlata && html`<${Sel} valor=${f.cierre} opts=${['ABIERTO', 'CERRADO']} vacio="Cierre: todos"
+        ${verPlata && html`<${Sel} valor=${f.cierre} opts=${['ABIERTO', 'CERRADO', CIERRE_PENDIENTE_COBRANZA]} vacio="Cierre: todos"
           alCambiar=${v => cambiar('cierre', v)} />`}
         <label class="fila mini" style="gap:4px;white-space:nowrap">
           <input type="checkbox" style="width:auto" checked=${f.abiertos}
@@ -3419,9 +3446,12 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
     setB(x => ({ ...x, tipo_servicio: v, prioridad: (cat && cat.extra) || x.prioridad }));
   };
   // al pasar a CUMPLIDO el trabajo queda ABIERTO hasta que alguien lo cierre
+  // (si ya estaba CERRADO o PENDIENTE COBRANZA, esa decisión se respeta)
   const elegirEstado = v => setB(x => ({
     ...x, estado: v,
-    cierre: v === 'CUMPLIDO' ? (x.cierre === 'CERRADO' ? 'CERRADO' : 'ABIERTO') : null,
+    cierre: v === 'CUMPLIDO'
+      ? (['CERRADO', CIERRE_PENDIENTE_COBRANZA].includes(x.cierre) ? x.cierre : 'ABIERTO')
+      : null,
   }));
   /* Los datos de cobranza ya no se editan desde acá: se muestran y se guardan
      siempre como están en el módulo Cobranza, para no pisar lo que cargó
@@ -3452,6 +3482,20 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
         .sort((x, y) => String(y.fecha_visita || '').localeCompare(String(x.fecha_visita || ''))),
     [s.trabajos, b.equipo_id]);
 
+  /* Sólo para un trabajo NUEVO: si el cliente elegido tiene otro trabajo
+     viejo que quedó sin cerrar o cerrado "pendiente de cobranza", puede
+     estar debiendo. Antes de coordinar una visita nueva conviene saberlo
+     y chequearlo con Administración. */
+  const deudaCliente = useMemo(() => {
+    if (!nuevo || !b.cliente_id) return [];
+    return s.trabajos.filter(t => t.cliente_id === b.cliente_id
+      && (estaAbierto(t) || t.cierre === CIERRE_PENDIENTE_COBRANZA));
+  }, [nuevo, b.cliente_id, s.trabajos]);
+  const [avisoCobranza, setAvisoCobranza] = useState(false);
+  useEffect(() => {
+    setAvisoCobranza(nuevo && deudaCliente.length > 0);
+  }, [b.cliente_id]);
+
   async function guardar(extra) {
     setGuardando(true);
     let cuerpo = {};
@@ -3477,6 +3521,8 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
       toast(res.enCola
           ? 'Sin conexión: quedó guardado en este equipo y se sube solo cuando vuelva internet'
         : extra && extra.cierre === 'CERRADO' ? 'Trabajo cerrado'
+        : extra && extra.cierre === CIERRE_PENDIENTE_COBRANZA ? 'Cerrado como pendiente de cobranza'
+        : extra && extra.cierre === 'ABIERTO' ? 'Trabajo reabierto'
         : nuevo ? `Trabajo creado${cuerpo.cierre === 'CERRADO' ? ' y cerrado (cobrado en efectivo)' : ''}`
         : 'Cambios guardados', res.enCola ? '' : 'ok');
       alCerrar();
@@ -3542,7 +3588,28 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
         ${!nuevo && Pest('historial', `Historial (${historialEquipo.length})`)}
       </div>
       <div class="ficha-cuerpo">
-        ${puedeVerPlata() && !nuevo && b.estado === 'CUMPLIDO' && b2.cierre !== 'CERRADO' && html`
+        ${nuevo && deudaCliente.length > 0 && html`<div class="aviso alerta">
+          <b>⚠ Pendiente la gestión de cobranza</b>
+          <div class="mini">Este cliente tiene ${deudaCliente.length} trabajo${deudaCliente.length > 1 ? 's' : ''} viejo
+            sin cerrar o cerrado con un pago pendiente. Chequeá con Administración si existe un pendiente de pago antes
+            de coordinar esta visita; si lo hay, recordale al cliente que debe estar al día, sin deudas, para poder
+            coordinarla.</div>
+        </div>`}
+        ${avisoCobranza && html`<${Modal} titulo="Pendiente la gestión de cobranza" alCerrar=${() => setAvisoCobranza(false)} ancho=${480}>
+          <p>Este cliente tiene trabajos viejos sin cerrar o cerrados con un pago pendiente:</p>
+          <ul class="mini" style="margin:6px 0 12px;padding-left:18px">
+            ${deudaCliente.slice(0, 8).map(t => html`<li key=${t.id}>${t.n_llamada || '#' + t.id} ·
+              ${fecha(t.fecha_visita, 1) || 'sin fecha'} ·
+              ${t.cierre === CIERRE_PENDIENTE_COBRANZA ? 'Pendiente de cobranza' : 'Sin cerrar'}</li>`)}
+            ${deudaCliente.length > 8 && html`<li>y ${deudaCliente.length - 8} más…</li>`}
+          </ul>
+          <p><b>Chequeá con Administración si existe un pendiente de pago.</b> En caso de que lo haya, recordale al
+            cliente que debe estar al día, sin deudas, para poder coordinar la visita.</p>
+          <div class="fila" style="justify-content:flex-end;margin-top:10px">
+            <button class="btn" onClick=${() => setAvisoCobranza(false)}>Entendido</button>
+          </div>
+        <//>`}
+        ${puedeVerPlata() && !nuevo && b.estado === 'CUMPLIDO' && estaAbierto(b2) && html`
           <div class="aviso-cierre">
             <div class="crece">
               <b>⚠ Trabajo cumplido pero ABIERTO</b>
@@ -3555,20 +3622,30 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
                           : '')}</div>`
                 : html`<div class="mini">Ya está la facturación definida y las observaciones cargadas: se puede cerrar.</div>`}
             </div>
-            ${edCob && (falta.length && !esAdmin()
-              ? html`<button class="btn sec" title=${'Falta ' + falta.join(' y ')}
-                  onClick=${() => { set({ vista: 'cobranza' }); alCerrar(); }}>
-                  Completar en Cobranza →</button>`
-              : html`<button class="btn" disabled=${guardando}
-                  onClick=${() => guardar({ cierre: 'CERRADO' })}>
-                  ${falta.length ? 'Cerrar igual (administrador)' : 'Cerrar trabajo'}</button>`)}
+            ${edCob && html`<div class="fila" style="gap:6px;flex-wrap:wrap">
+              ${falta.length && !esAdmin()
+                ? html`<button class="btn sec" title=${'Falta ' + falta.join(' y ')}
+                    onClick=${() => { set({ vista: 'cobranza' }); alCerrar(); }}>
+                    Completar en Cobranza →</button>`
+                : html`<button class="btn" disabled=${guardando}
+                    onClick=${() => guardar({ cierre: 'CERRADO' })}>
+                    ${falta.length ? 'Cerrar igual (administrador)' : 'Cerrar trabajo'}</button>`}
+              <button class="btn sec" disabled=${guardando}
+                title="Para casos viejos que no se van a cobrar en lo inmediato: lo saca de la cola de pendientes, pero deja registrado que todavía debe"
+                onClick=${() => guardar({ cierre: CIERRE_PENDIENTE_COBRANZA })}>Cerrar (pendiente de cobranza)</button>
+            </div>`}
           </div>`}
-        ${puedeVerPlata() && !nuevo && b2.cierre === 'CERRADO' && html`
+        ${puedeVerPlata() && !nuevo && (b2.cierre === 'CERRADO' || b2.cierre === CIERRE_PENDIENTE_COBRANZA) && html`
           <div class="fila mini" style="margin-bottom:10px">
-            <span class="et verde">CERRADO</span>
-            <span>El trabajo está terminado también en lo administrativo.</span>
-            ${edCob && html`<button class="btn sec chico" style="margin-left:auto"
-              onClick=${() => guardar({ cierre: 'ABIERTO' })}>Reabrir</button>`}
+            <span class=${'et ' + (b2.cierre === 'CERRADO' ? 'verde' : 'ambar')}>${b2.cierre}</span>
+            <span>${b2.cierre === 'CERRADO'
+              ? 'El trabajo está terminado también en lo administrativo.'
+              : 'Cerrado técnicamente, pero todavía tiene un pago pendiente. El cobro se sigue viendo en Cobranza.'}</span>
+            ${edCob && html`<div class="fila" style="margin-left:auto;gap:6px">
+              ${b2.cierre === CIERRE_PENDIENTE_COBRANZA && html`<button class="btn chico" disabled=${guardando}
+                onClick=${() => guardar({ cierre: 'CERRADO' })}>Ya pagó: cerrar</button>`}
+              <button class="btn sec chico" onClick=${() => guardar({ cierre: 'ABIERTO' })}>Reabrir</button>
+            </div>`}
           </div>`}
         ${pestania === 'servicio' && html`<div>
           <fieldset><legend>Pedido</legend>
@@ -5435,6 +5512,15 @@ function Cobranza() {
     await cambiar(t, { cierre: 'CERRADO' });
   }
 
+  /* Para casos viejos que no se van a cobrar en lo inmediato: saca al
+     trabajo de "Cumplidos sin cerrar" (no exige tener completa la
+     facturación ni las observaciones, al revés de cerrar()) pero deja
+     registrado que todavía debe. Sigue viéndose en "Pendientes de cobro"
+     hasta que se marque como pagado. */
+  async function pendienteCobranza(t) {
+    await cambiar(t, { cierre: 'PENDIENTE COBRANZA' }, 'Cerrado como pendiente de cobranza');
+  }
+
   const cols = [
     { rot: 'N° LL', val: t => t.n_llamada }, { rot: 'Cliente', val: t => t.cliente_nombre },
     { rot: 'CUIT/DNI', val: t => t.cliente_cuit }, { rot: 'N° Serie', val: t => t.n_serie },
@@ -5615,13 +5701,22 @@ function Cobranza() {
             <td class="num">${t.cobrado === 'SI' ? '' : (dias(t) !== null
               ? html`<${Et} txt=${dias(t) + ' d'} color=${dias(t) > 60 ? 'rojo' : dias(t) > 30 ? 'ambar' : 'gris'} />` : '')}</td>
             <td><${MarcaCierre} t=${t} /></td>
-            <td class="no-imprimir">${editable && estaAbierto(t) && (faltaParaCerrar(t).length
-              ? (esAdmin()
-                ? html`<button class="btn chico" title=${'Como administrador podés cerrarlo igual, aunque falte ' + faltaParaCerrar(t).join(' y ')}
-                    onClick=${() => cerrar(t)}>Cerrar igual</button>`
-                : html`<button class="btn sec chico" title=${'Falta ' + faltaParaCerrar(t).join(' y ')}
-                    onClick=${() => setFichaId(t.id)}>Completar…</button>`)
-              : html`<button class="btn chico" onClick=${() => cerrar(t)}>Cerrar</button>`)}</td>
+            <td class="no-imprimir">${editable && (estaAbierto(t)
+              ? html`<div class="fila" style="gap:4px;flex-wrap:nowrap">
+                  ${faltaParaCerrar(t).length
+                    ? (esAdmin()
+                      ? html`<button class="btn chico" title=${'Como administrador podés cerrarlo igual, aunque falte ' + faltaParaCerrar(t).join(' y ')}
+                          onClick=${() => cerrar(t)}>Cerrar igual</button>`
+                      : html`<button class="btn sec chico" title=${'Falta ' + faltaParaCerrar(t).join(' y ')}
+                          onClick=${() => setFichaId(t.id)}>Completar…</button>`)
+                    : html`<button class="btn chico" onClick=${() => cerrar(t)}>Cerrar</button>`}
+                  <button class="btn sec chico"
+                    title="Para casos viejos que no se van a cobrar en lo inmediato: lo saca de la cola pero deja registrado que todavía debe"
+                    onClick=${() => pendienteCobranza(t)}>Pendiente cobranza</button>
+                </div>`
+              : (t.cierre === 'PENDIENTE COBRANZA'
+                ? html`<button class="btn chico" onClick=${() => cerrar(t)}>Ya pagó: cerrar</button>`
+                : ''))}</td>
             <td>${editable
               ? html`<${CampoGrilla} valor=${t.obs_cobranza} ancho=${220} titulo="Observaciones de cobranza"
                   onGuardar=${v => cambiar(t, { obs_cobranza: v })} />`
