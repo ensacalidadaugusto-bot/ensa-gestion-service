@@ -2407,7 +2407,6 @@ const COLS_REGISTRO = [
   ['Semana de la gira',          t => t.n_semana],
   ['Zona de la gira',            t => t.gira_zona],
   ['Fecha de visita',            t => t.fecha_visita && { f: t.fecha_visita }],
-  ['Confirmación',               t => t.confirmacion],
   ['Última modificación',        t => t.actualizado_en ? momento(t.actualizado_en) : null],
   ['Modificado por',             t => t.actualizado_por],
 ];
@@ -2487,7 +2486,7 @@ function libroDeRespaldo() {
           t.modelo, t.n_paradas, t.motorizacion, t.puerta, t.cliente_nombre, ciudadDe(t),
           provinciaDe(t), direccionDe(t), t.cliente_telefono,
           t.fecha_pedido && { f: t.fecha_pedido }, t.tipo_servicio,
-          t.fecha_visita && { f: t.fecha_visita }, t.obs_servicio, t.tecnicos, t.estado, t.confirmacion,
+          t.fecha_visita && { f: t.fecha_visita }, t.obs_servicio, t.tecnicos, t.estado,
         ]));
     });
 
@@ -2533,7 +2532,7 @@ function libroDeRespaldo() {
       columnas: ['Semana', 'Año', 'Zona', 'Técnico de la gira', 'Técnico 2 de la gira', 'Vehículo', 'Viáticos',
         'N° LL', 'Tipo de Pedido', 'Fecha de Instalación', 'N° Serie', 'Mod.', 'N° P', 'MOT.',
         'Puerta', 'Cliente', 'Ciudad', 'Provincia', 'Dirección', 'Teléfono', 'Fecha Pedido',
-        'Tipo  Servicio', 'VISITA', 'OBSERVACIONES', 'Técnico del trabajo', 'Estado', 'Confirmación'],
+        'Tipo  Servicio', 'VISITA', 'OBSERVACIONES', 'Técnico del trabajo', 'Estado'],
       filas: ruta,
     },
     {
@@ -3422,7 +3421,7 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
       const datos = { ...b, ...cobranzaViva(), ...(extra || {}) };
       const campos = ['correlativo','n_llamada','cliente_id','equipo_id','tipo_pedido','tipo_servicio',
         'prioridad','estado','cierre','fecha_pedido','fecha_visita','gira_id','orden_gira',
-        'confirmacion','encuesta','horas_mo','obs_servicio','comentarios','precio_sin_iva','facturado',
+        'encuesta','horas_mo','obs_servicio','comentarios','precio_sin_iva','facturado',
         'factura_solicitada','fecha_solicitud_factura','fecha_factura','tipo_factura','concepto',
         'cobrado','fecha_pago','obs_cobranza','encuesta_enviada','fecha_encuesta'];
       campos.forEach(k => { if (k in datos) cuerpo[k] = datos[k] === '' ? null : datos[k]; });
@@ -3559,8 +3558,6 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
                 alCambiar=${v => c('fecha_visita', v)} disabled=${!edServ} />
               <${HorasMin} rot="Horas de mano de obra" valor=${b.horas_mo}
                 alCambiar=${v => c('horas_mo', v)} disabled=${!edServ} />
-              <${Sel} rot="Confirmación" valor=${b.confirmacion} opts=${opciones('confirmacion')}
-                alCambiar=${v => c('confirmacion', v)} disabled=${!edServ} />
               <${Sel} rot="Encuesta de satisfacción" valor=${b.encuesta} opts=${opciones('encuesta')}
                 alCambiar=${v => c('encuesta', v)} disabled=${!edServ} />
             </div>
@@ -4322,11 +4319,6 @@ function Giras() {
     try { await guardarTrabajo(t.id, { fecha_visita: iso }); }
     catch (e) { toast('No se pudo mover: ' + e.message, 'error'); }
   }
-  async function cumplir(t) {
-    try { await guardarTrabajo(t.id, { estado: 'CUMPLIDO' }); }
-    catch (e) { toast('No se pudo actualizar: ' + e.message, 'error'); }
-  }
-
   const dias = useMemo(() => {
     const m = new Map();
     paradas.forEach(t => {
@@ -4448,8 +4440,6 @@ function Giras() {
               ${editable && html`<div class="fila" style="gap:4px">
                 <input type="date" style="width:130px" value=${t.fecha_visita || ''}
                   onChange=${e => moverDia(t, e.target.value)} />
-                ${t.estado !== 'CUMPLIDO' && html`<button class="btn sec chico" title="Marcar como cumplido"
-                  onClick=${() => cumplir(t)}>✓</button>`}
                 <button class="btn sec chico" title="Quitar de la gira" onClick=${() => quitar(t)}>✕</button>
               </div>`}
             </div>`)}
@@ -5213,16 +5203,18 @@ function Cobranza() {
   });
   const seleccionados = useMemo(() => s.trabajos.filter(t => seleccion.has(t.id)), [s.trabajos, seleccion]);
 
-  /* Si se llegó acá desde la ficha de un trabajo, se busca ese trabajo solo:
-     se limpia el filtro para que no quede escondido y se abre su ficha.
-     Se para siempre en "Todos los registros": así el trabajo elegido
-     aparece seguro, esté o no todavía en el circuito de facturación. */
+  /* Si se llegó acá desde la ficha de un trabajo ("Abrir este trabajo en
+     Cobranza →"), se abre directamente en "Cumplidos sin cerrar" -- el
+     apartado donde se sigue el cierre de un caso -- con el cliente ya
+     escrito en el buscador, para ver de una todo lo que le falta cerrar
+     a ese cliente. La ficha del trabajo puntual se abre igual encima,
+     así que aparece aunque ese caso en particular ya no esté abierto. */
   useEffect(() => {
     if (!s.irACobranza) return;
     const t = S.trabajos.find(x => String(x.id) === String(s.irACobranza));
     set({ irACobranza: null });
     if (!t) return;
-    setVista('todos_registros'); setBusca(t.cliente_nombre || t.n_llamada || ''); setAnio(''); setMes('');
+    setVista('sin_cerrar'); setBusca(t.cliente_nombre || t.n_llamada || ''); setAnio(''); setMes('');
     setFichaId(t.id);
     setDestacado(t.id);
   }, [s.irACobranza]);
@@ -5343,11 +5335,14 @@ function Cobranza() {
     { rot: 'Factura solicitada', val: t => t.factura_solicitada ? 'SI' : 'NO' },
     { rot: 'Fecha de solicitud', val: t => fecha(t.fecha_solicitud_factura, 1) },
     { rot: 'Facturado', val: t => t.facturado }, { rot: 'Fecha factura', val: t => fecha(t.fecha_factura, 1) },
-    { rot: 'Tipo', val: t => t.tipo_factura }, { rot: 'Cobrado', val: t => t.cobrado },
-    { rot: 'Fecha de pago', val: t => fecha(t.fecha_pago, 1) },
+    { rot: 'Tipo', val: t => t.tipo_factura },
     { rot: 'Cierre', val: t => cierreQueCorresponde(t) || '' },
     { rot: 'Obs. del servicio', val: t => t.obs_servicio },
     { rot: 'Correo', val: t => t.cliente_correo }, { rot: 'Observaciones', val: t => t.obs_cobranza },
+    /* Cobrado y Fecha de pago van al final a propósito: son los que cierran
+       el caso, y así queda la observación cargada antes de tocarlos. */
+    { rot: 'Cobrado', val: t => t.cobrado },
+    { rot: 'Fecha de pago', val: t => fecha(t.fecha_pago, 1) },
   ];
 
   /* La foto de arriba mira TODOS los trabajos del período, no sólo los que
@@ -5434,12 +5429,12 @@ function Cobranza() {
           <${Th} campo="facturado" rot="Facturado" orden=${orden} setOrden=${setOrden} />
           <${Th} campo="fecha_factura" rot="F. factura" orden=${orden} setOrden=${setOrden} />
           <${Th} campo="tipo_factura" rot="Tipo" orden=${orden} setOrden=${setOrden} />
-          <${Th} campo="cobrado" rot="Cobrado" orden=${orden} setOrden=${setOrden} />
-          <${Th} campo="fecha_pago" rot="F. pago" orden=${orden} setOrden=${setOrden} />
           <th>Días</th>
           <${Th} campo="cierre" rot="Cierre" orden=${orden} setOrden=${setOrden} />
           <th class="no-imprimir"></th>
           <th>Observaciones</th>
+          <${Th} campo="cobrado" rot="Cobrado" orden=${orden} setOrden=${setOrden} />
+          <${Th} campo="fecha_pago" rot="F. pago" orden=${orden} setOrden=${setOrden} />
         </tr></thead>
         <tbody>
           ${filtrados.slice(0, tope).map(t => html`<tr key=${t.id}
@@ -5504,15 +5499,6 @@ function Cobranza() {
                   <option value="">—</option>
                   ${opciones('tipo_factura').map(o => html`<option value=${o}>${o}</option>`)}</select>`
               : html`<${Et} txt=${t.tipo_factura} color="gris" />`}</td>
-            <td class="no-imprimir">${editable
-              ? html`<select style="width:112px" value=${t.cobrado || ''}
-                  onChange=${e => marcarCobro(t, e.target.value)}>
-                  ${opciones('cobrado').map(o => html`<option value=${o}>${o}</option>`)}</select>`
-              : html`<${Et} txt=${t.cobrado} mapa=${COLOR_COBRO} />`}</td>
-            <td class="no-imprimir">${editable
-              ? html`<input type="date" style="width:130px" value=${t.fecha_pago || ''}
-                  onChange=${e => cambiar(t, { fecha_pago: e.target.value || null })} />`
-              : fecha(t.fecha_pago)}</td>
             <td class="num">${t.cobrado === 'SI' ? '' : (dias(t) !== null
               ? html`<${Et} txt=${dias(t) + ' d'} color=${dias(t) > 60 ? 'rojo' : dias(t) > 30 ? 'ambar' : 'gris'} />` : '')}</td>
             <td><${MarcaCierre} t=${t} /></td>
@@ -5527,6 +5513,15 @@ function Cobranza() {
               ? html`<${CampoGrilla} valor=${t.obs_cobranza} ancho=${220} titulo="Observaciones de cobranza"
                   onGuardar=${v => cambiar(t, { obs_cobranza: v })} />`
               : html`<span title=${t.obs_cobranza}>${t.obs_cobranza || ''}</span>`}</td>
+            <td class="no-imprimir">${editable
+              ? html`<select style="width:112px" value=${t.cobrado || ''}
+                  onChange=${e => marcarCobro(t, e.target.value)}>
+                  ${opciones('cobrado').map(o => html`<option value=${o}>${o}</option>`)}</select>`
+              : html`<${Et} txt=${t.cobrado} mapa=${COLOR_COBRO} />`}</td>
+            <td class="no-imprimir">${editable
+              ? html`<input type="date" style="width:130px" value=${t.fecha_pago || ''}
+                  onChange=${e => cambiar(t, { fecha_pago: e.target.value || null })} />`
+              : fecha(t.fecha_pago)}</td>
           </tr>`)}
         </tbody>
       </table>
