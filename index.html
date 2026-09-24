@@ -78,14 +78,6 @@
   --esc-0:#f2f6fb; --esc-1:#dbe8f6; --esc-2:#bcd5ee; --esc-3:#94bde4;
   --esc-4:#6ba3dd; --esc-5:#4382c1;
   --reja:#e6ebf1;          /* las líneas de fondo de los gráficos */
-  /* Tipografía técnica para etiquetas, códigos y números: monoespaciada,
-     de sistema (no depende de internet -- ver comentario en build.py sobre
-     por qué la aplicación no carga nada de afuera más que la base de datos).
-     Se usa en encabezados de columna, etiquetas de estado, números y
-     rótulos en mayúscula: el mismo espíritu "panel de instrumentos" de
-     Geist Mono, con tipografías que ya vienen instaladas en cualquier
-     equipo. */
-  --mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,"Liberation Mono",monospace;
 }
 
 /* --------- modo oscuro: mismos tonos, dados vuelta --------- */
@@ -608,27 +600,8 @@ table.calor .celda{display:flex;align-items:center;justify-content:center;min-wi
 .aviso{padding:9px 12px;border-radius:6px;margin-bottom:10px;font-size:12px;
   background:var(--azul-claro);color:var(--azul-claro-txt)}
 .aviso .mini{color:inherit;opacity:.85}
-.ruta{font-family:var(--mono);font-size:.94em;
+.ruta{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:.94em;
   background:color-mix(in srgb, var(--texto) 10%, transparent);border-radius:4px;padding:1px 4px}
-/* ---- tipografía técnica: encabezados, etiquetas de estado, códigos y
-   números en monoespaciada ----
-   No es un cambio de paleta ni de layout -- el diseño claro y funcional de
-   la aplicación se queda como está -- sino un detalle tomado de esa
-   estética "panel de instrumentos" (Geist Mono, mayúsculas, tracking
-   ajustado) aplicado sólo donde el dato es un código, un número o una
-   etiqueta corta: ahí una tipografía monoespaciada se lee más parecida a
-   un tablero técnico. El texto que se lee en prosa (nombres, direcciones,
-   observaciones, comentarios) sigue en la tipografía humanista de siempre,
-   porque ahí lo que importa es la lectura cómoda, no el efecto. */
-table.grilla th,
-table.calor th,
-.et,
-label.campo>span,
-.rot,.rot-sector,.rot-bloque,
-.titulo-dia,
-.mapa-ar .prov .sigla,.mapa-ar .prov .dato,
-td.num,
-table.grilla.registro td.pedido{font-family:var(--mono)}
 .aviso.info{background:var(--azul-claro);color:var(--azul-claro-txt)}
 .aviso.error{background:var(--et-rojo);color:var(--et-rojo-t)}
 .aviso.ok{background:var(--et-verde);color:var(--et-verde-t)}
