@@ -3375,6 +3375,44 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
       toast('No se pudo guardar: ' + e.message, 'error');
     }
   }
+
+  /* Los campos de Cobranza que se editan acá adentro (admin, oficina y
+     ahora también cobranza) se guardan uno por uno, igual que en el
+     propio módulo Cobranza (ver cambiar(), en 60_cobranza.js): así no
+     hace falta pasar por el botón "Guardar" general de la ficha -que
+     manda junto todo el estado local de la solapa Servicio- y no se
+     corre el riesgo de pisar un cambio que haya hecho alguien más en
+     Cobranza mientras esta ficha estaba abierta. */
+  async function cambiarCobranza(campos, aviso) {
+    if (!original) return;
+    try {
+      const r = await actualizarTrabajo(id, campos, original.actualizado_en);
+      toast(r.enCola ? 'Sin conexión: se guardó acá y se sube cuando vuelva internet'
+        : (aviso || 'Guardado'), r.enCola ? '' : 'ok');
+    } catch (e) {
+      if (e.conflicto) { toast('Otra persona modificó este registro. Se actualizó la fila.', 'error'); refrescarTrabajo(id); }
+      else toast('No se pudo guardar: ' + e.message, 'error');
+    }
+  }
+
+  /* Mismo criterio que marcarCobro() en el módulo Cobranza: al cobrar (o
+     cancelar por pago en efectivo) el trabajo queda cerrado solo si ya
+     no le falta ningún otro dato. */
+  async function marcarCobro(valor) {
+    const campos = { cobrado: valor };
+    if (['SI', 'CANCELADO'].includes(valor) && !b2.fecha_pago) campos.fecha_pago = hoyISO();
+    let aviso = 'Guardado';
+    if (['SI', 'CANCELADO'].includes(valor) && estaAbierto(b2)) {
+      const faltaAlCobrar = faltaParaCerrar({ ...b2, ...campos });
+      if (faltaAlCobrar.length) {
+        aviso = `Cobro registrado. El trabajo sigue ABIERTO: falta ${faltaAlCobrar.join(' y ')}.`;
+      } else {
+        campos.cierre = 'CERRADO';
+        aviso = 'Cobro registrado y trabajo CERRADO';
+      }
+    }
+    await cambiarCobranza(campos, aviso);
+  }
   // sugerir prioridad según el tipo de servicio
   const elegirServicio = v => {
     const cat = S.catalogos.find(x => x.tipo === 'tipo_servicio' && x.valor === v);
@@ -3510,14 +3548,14 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
               <b>⚠ Trabajo cumplido pero ABIERTO</b>
               ${falta.length
                 ? html`<div class="mini">Para cerrarlo falta ${falta.join(' y ')}.${
-                    soloFaltanObservaciones(b2)
-                      ? (esAdmin()
-                          ? ' Como administrador podés cerrarlo igual.'
-                          : ' Sólo el administrador puede cerrarlo sin las observaciones.')
-                      : ''}</div>`
+                    esAdmin()
+                      ? ' Como administrador podés cerrarlo igual.'
+                      : (soloFaltanObservaciones(b2)
+                          ? ' Sólo el administrador puede cerrarlo sin las observaciones.'
+                          : '')}</div>`
                 : html`<div class="mini">Ya está la facturación definida y las observaciones cargadas: se puede cerrar.</div>`}
             </div>
-            ${edCob && (falta.length && !(soloFaltanObservaciones(b2) && esAdmin())
+            ${edCob && (falta.length && !esAdmin()
               ? html`<button class="btn sec" title=${'Falta ' + falta.join(' y ')}
                   onClick=${() => { set({ vista: 'cobranza' }); alCerrar(); }}>
                   Completar en Cobranza →</button>`
@@ -3580,41 +3618,116 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
 
         ${pestania === 'cobranza' && html`<div>
           <div class="aviso">
-            <b>Esto es un reflejo de cómo quedó en Cobranza.</b>
-            <div class="mini">Acá se ve el estado administrativo del trabajo; se carga y se corrige
-              desde el módulo <b>Cobranza</b>, que es donde vive ese circuito.</div>
+            ${edCob
+              ? html`<div>
+                  <b>Se guarda directo en Cobranza.</b>
+                  <div class="mini">Cada campo se guarda apenas se completa, igual que en el módulo
+                    <b>Cobranza</b>: así no se pisa nada si alguien más está tocando este mismo
+                    trabajo al mismo tiempo.</div>
+                </div>`
+              : html`<div>
+                  <b>Esto es un reflejo de cómo quedó en Cobranza.</b>
+                  <div class="mini">Acá se ve el estado administrativo del trabajo; se carga y se corrige
+                    desde el módulo <b>Cobranza</b>, que es donde vive ese circuito.</div>
+                </div>`}
           </div>
 
           <fieldset><legend>Facturación</legend>
-            <div class="fila" style="flex-wrap:wrap;gap:18px">
-              ${puedeMontos() && html`<${Dato} rot="Precio sin IVA" val=${plata(b2.precio_sin_iva)} ancho=${130} />`}
-              ${puedeMontos() && html`<${Dato} rot=${'Con IVA ' + ivaDe(b2) + '%'} ancho=${130}
+            <div class="fila" style="flex-wrap:wrap;gap:18px;align-items:flex-end">
+              ${puedeMontos() && (edCob
+                ? html`<${Campo} rot="Precio sin IVA">
+                    <${CampoGrilla} valor=${b2.precio_sin_iva} numero=${true} ancho=${130} titulo="Precio sin IVA"
+                      onGuardar=${v => cambiarCobranza({ precio_sin_iva: v })} />
+                  <//>`
+                : html`<${Dato} rot="Precio sin IVA" val=${plata(b2.precio_sin_iva)} ancho=${130} />`)}
+              ${puedeMontos() && (edCob
+                ? html`<${Campo} rot="IVA %">
+                    <${CampoGrilla} valor=${b2.iva} numero=${true} ancho=${80}
+                      placeholder=${String(Number(s.config.iva) || 21)}
+                      titulo="Porcentaje de IVA de este trabajo. Vacío = el de Configuración"
+                      onGuardar=${v => cambiarCobranza({ iva: v })} />
+                  <//>`
+                : html`<${Dato} rot="IVA %" val=${ivaDe(b2) + '%'} ancho=${80} />`)}
+              ${puedeMontos() && html`<${Dato} rot="Con IVA" ancho=${130}
                 val=${b2.precio_sin_iva ? plata((Number(b2.precio_sin_iva) || 0) * (1 + ivaDe(b2) / 100)) : ''} />`}
-              <${Dato} rot="Facturado / enviado" ancho=${140}
-                val=${b2.facturado ? html`<${Et} txt=${b2.facturado} mapa=${COLOR_COBRO} />` : ''} />
-              <${Dato} rot="Fecha de factura" val=${fecha(b2.fecha_factura, 1)} ancho=${120} />
-              <${Dato} rot="Tipo de factura" val=${b2.tipo_factura} ancho=${110} />
-              <${Dato} rot="Factura solicitada" ancho=${170}
-                val=${b2.factura_solicitada
-                  ? 'Sí' + (b2.fecha_solicitud_factura ? ' · ' + fecha(b2.fecha_solicitud_factura, 1) : '')
-                  : 'No'} />
+              ${edCob
+                ? html`<${Campo} rot="Facturado / enviado">
+                    <select value=${b2.facturado || ''} onChange=${e => cambiarCobranza({ facturado: e.target.value })}>
+                      ${opciones('facturado').map(o => html`<option value=${o}>${o}</option>`)}</select>
+                  <//>`
+                : html`<${Dato} rot="Facturado / enviado" ancho=${140}
+                    val=${b2.facturado ? html`<${Et} txt=${b2.facturado} mapa=${COLOR_COBRO} />` : ''} />`}
+              ${edCob
+                ? html`<${Campo} rot="Fecha de factura">
+                    <input type="date" value=${b2.fecha_factura || ''}
+                      onChange=${e => cambiarCobranza({ fecha_factura: e.target.value || null })} />
+                  <//>`
+                : html`<${Dato} rot="Fecha de factura" val=${fecha(b2.fecha_factura, 1)} ancho=${120} />`}
+              ${edCob
+                ? html`<${Campo} rot="Tipo de factura">
+                    <select value=${b2.tipo_factura || ''}
+                      onChange=${e => cambiarCobranza({ tipo_factura: e.target.value || null })}>
+                      <option value="">—</option>
+                      ${opciones('tipo_factura').map(o => html`<option value=${o}>${o}</option>`)}</select>
+                  <//>`
+                : html`<${Dato} rot="Tipo de factura" val=${b2.tipo_factura} ancho=${110} />`}
             </div>
-            ${b2.concepto && html`<div style="margin-top:10px">
+
+            <div style="margin-top:10px">
               <div class="mini" style="text-transform:uppercase;letter-spacing:.03em;opacity:.7">Concepto</div>
-              <div style="white-space:pre-wrap;font-size:14px">${b2.concepto}</div></div>`}
+              ${edCob
+                ? html`<${CampoGrilla} valor=${b2.concepto} area=${true} ancho=${420} titulo="Concepto"
+                    onGuardar=${v => cambiarCobranza({ concepto: v })} />`
+                : (b2.concepto ? html`<div style="white-space:pre-wrap;font-size:14px">${b2.concepto}</div>` : '—')}
+            </div>
+
+            <div class="mini" style="margin-top:10px">
+              ${edCob
+                ? html`<div class="fila" style="gap:10px;align-items:center;flex-wrap:wrap">
+                    <label class="fila" style="gap:6px;cursor:pointer">
+                      <input type="checkbox" style="width:auto" checked=${!!b2.factura_solicitada}
+                        onChange=${e => cambiarCobranza({ factura_solicitada: e.target.checked,
+                          fecha_solicitud_factura: e.target.checked ? (b2.fecha_solicitud_factura || hoyISO()) : null })} />
+                      Factura solicitada a Administración
+                    </label>
+                    ${b2.factura_solicitada && html`<input type="date" style="width:140px"
+                        title="Fecha en que se pidió la factura a Administración"
+                        value=${b2.fecha_solicitud_factura || ''}
+                        onChange=${e => cambiarCobranza({ fecha_solicitud_factura: e.target.value || null })} />`}
+                  </div>`
+                : html`<span>Factura solicitada: ${b2.factura_solicitada
+                    ? 'Sí' + (b2.fecha_solicitud_factura ? ' · ' + fecha(b2.fecha_solicitud_factura, 1) : '')
+                    : 'No'}</span>`}
+            </div>
           </fieldset>
 
           <fieldset><legend>Cobro</legend>
-            <div class="fila" style="flex-wrap:wrap;gap:18px">
-              <${Dato} rot="Cobrado" ancho=${130}
-                val=${b2.cobrado ? html`<${Et} txt=${b2.cobrado} mapa=${COLOR_COBRO} />` : ''} />
-              <${Dato} rot="Fecha de pago" val=${fecha(b2.fecha_pago, 1)} ancho=${120} />
+            <div class="fila" style="flex-wrap:wrap;gap:18px;align-items:flex-end">
+              ${edCob
+                ? html`<${Campo} rot="Cobrado">
+                    <select value=${b2.cobrado || ''} onChange=${e => marcarCobro(e.target.value)}>
+                      ${opciones('cobrado').map(o => html`<option value=${o}>${o}</option>`)}</select>
+                  <//>`
+                : html`<${Dato} rot="Cobrado" ancho=${130}
+                    val=${b2.cobrado ? html`<${Et} txt=${b2.cobrado} mapa=${COLOR_COBRO} />` : ''} />`}
+              ${edCob
+                ? html`<${Campo} rot="Fecha de pago">
+                    <input type="date" value=${b2.fecha_pago || ''}
+                      onChange=${e => cambiarCobranza({ fecha_pago: e.target.value || null })} />
+                  <//>`
+                : html`<${Dato} rot="Fecha de pago" val=${fecha(b2.fecha_pago, 1)} ancho=${120} />`}
               <${Dato} rot="Cierre" ancho=${130}
                 val=${b.estado === 'CUMPLIDO' ? html`<${MarcaCierre} t=${b2} />` : '—'} />
             </div>
-            ${b2.obs_cobranza && html`<div style="margin-top:10px">
+
+            <div style="margin-top:10px">
               <div class="mini" style="text-transform:uppercase;letter-spacing:.03em;opacity:.7">Observaciones de cobranza</div>
-              <div style="white-space:pre-wrap;font-size:14px">${b2.obs_cobranza}</div></div>`}
+              ${edCob
+                ? html`<${CampoGrilla} valor=${b2.obs_cobranza} area=${true} ancho=${420} titulo="Observaciones de cobranza"
+                    onGuardar=${v => cambiarCobranza({ obs_cobranza: v })} />`
+                : (b2.obs_cobranza ? html`<div style="white-space:pre-wrap;font-size:14px">${b2.obs_cobranza}</div>` : '—')}
+            </div>
+
             ${cli && html`<div class="mini" style="margin-top:8px">
               ${edCob
                 ? html`<div class="fila" style="gap:10px;flex-wrap:wrap;align-items:center">
@@ -5311,12 +5424,12 @@ function Cobranza() {
   async function cerrar(t) {
     const falta = faltaParaCerrar(t);
     if (falta.length) {
-      if (!(soloFaltanObservaciones(t) && esAdmin())) {
+      if (!esAdmin()) {
         return toast(soloFaltanObservaciones(t)
           ? 'Faltan las observaciones del servicio: sólo el administrador puede cerrarlo así.'
           : 'No se puede cerrar todavía: falta ' + falta.join(' y ') + '.', 'error');
       }
-      await cambiar(t, { cierre: 'CERRADO' }, 'Cerrado por el administrador sin observaciones del servicio');
+      await cambiar(t, { cierre: 'CERRADO' }, 'Cerrado por el administrador sin ' + falta.join(' y '));
       return;
     }
     await cambiar(t, { cierre: 'CERRADO' });
@@ -5503,8 +5616,8 @@ function Cobranza() {
               ? html`<${Et} txt=${dias(t) + ' d'} color=${dias(t) > 60 ? 'rojo' : dias(t) > 30 ? 'ambar' : 'gris'} />` : '')}</td>
             <td><${MarcaCierre} t=${t} /></td>
             <td class="no-imprimir">${editable && estaAbierto(t) && (faltaParaCerrar(t).length
-              ? (soloFaltanObservaciones(t) && esAdmin()
-                ? html`<button class="btn chico" title="Faltan las observaciones del servicio; como administrador podés cerrarlo igual"
+              ? (esAdmin()
+                ? html`<button class="btn chico" title=${'Como administrador podés cerrarlo igual, aunque falte ' + faltaParaCerrar(t).join(' y ')}
                     onClick=${() => cerrar(t)}>Cerrar igual</button>`
                 : html`<button class="btn sec chico" title=${'Falta ' + faltaParaCerrar(t).join(' y ')}
                     onClick=${() => setFichaId(t.id)}>Completar…</button>`)
