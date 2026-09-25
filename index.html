@@ -3603,6 +3603,37 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
     style=${pestania === k ? 'background:var(--azul-claro);color:var(--azul)' : 'color:var(--suave)'}
     onClick=${() => setPestania(k)}>${rot}</button>`;
 
+  /* Estado, fecha de visita, horas, encuesta, técnicos y comentarios internos:
+     en un trabajo nuevo esto todavía no se sabe -- se completa después, al
+     coordinar o al cumplir la visita -- así que en un trabajo nuevo queda
+     plegado (ver más abajo) y sólo quedan a la vista Pedido y Observaciones
+     del servicio, que es lo que hace falta para anotar el llamado. En un
+     trabajo que ya existe se sigue viendo todo abierto, como siempre. */
+  const restoAtencion = html`<${Fragment}>
+    <div class="rejilla">
+      <${Sel} rot="Estado" valor=${b.estado} opts=${opciones('estado')}
+        alCambiar=${elegirEstado} disabled=${!edServ} />
+      <${Txt} rot="Fecha de visita" tipo="date" valor=${b.fecha_visita}
+        alCambiar=${v => c('fecha_visita', v)} disabled=${!edServ} />
+      <${HorasMin} rot="Horas de mano de obra" valor=${b.horas_mo}
+        alCambiar=${v => c('horas_mo', v)} disabled=${!edServ} />
+      <${Sel} rot="Encuesta de satisfacción" valor=${b.encuesta} opts=${opciones('encuesta')}
+        alCambiar=${v => c('encuesta', v)} disabled=${!edServ} />
+    </div>
+    <${Campo} rot="Técnicos asignados">
+      <div class="fila" style="gap:6px">
+        ${s.tecnicos.filter(t => t.activo || tecs.includes(t.id)).map(t => html`
+          <label class="fila mini" style="gap:3px;background:${tecs.includes(t.id) ? 'var(--azul-claro)' : 'var(--campo)'};
+            border:1px solid var(--borde);border-radius:14px;padding:2px 9px;cursor:pointer">
+            <input type="checkbox" style="width:auto" disabled=${!edServ} checked=${tecs.includes(t.id)}
+              onChange=${e => setTecs(e.target.checked ? [...tecs, t.id] : tecs.filter(x => x !== t.id))} />
+            ${t.nombre}</label>`)}
+      </div>
+    <//>
+    <${Txt} rot="Comentarios internos" area=${2} valor=${b.comentarios}
+      alCambiar=${v => c('comentarios', v)} disabled=${!edObs} />
+  <//>`;
+
   return html`<div class="fondo" onClick=${e => e.target.className === 'fondo' && alCerrar()}>
     <div class="ficha">
       <div class="ficha-cab">
@@ -3696,30 +3727,15 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
           </fieldset>
 
           <fieldset><legend>Atención</legend>
-            <div class="rejilla">
-              <${Sel} rot="Estado" valor=${b.estado} opts=${opciones('estado')}
-                alCambiar=${elegirEstado} disabled=${!edServ} />
-              <${Txt} rot="Fecha de visita" tipo="date" valor=${b.fecha_visita}
-                alCambiar=${v => c('fecha_visita', v)} disabled=${!edServ} />
-              <${HorasMin} rot="Horas de mano de obra" valor=${b.horas_mo}
-                alCambiar=${v => c('horas_mo', v)} disabled=${!edServ} />
-              <${Sel} rot="Encuesta de satisfacción" valor=${b.encuesta} opts=${opciones('encuesta')}
-                alCambiar=${v => c('encuesta', v)} disabled=${!edServ} />
-            </div>
-            <${Campo} rot="Técnicos asignados">
-              <div class="fila" style="gap:6px">
-                ${s.tecnicos.filter(t => t.activo || tecs.includes(t.id)).map(t => html`
-                  <label class="fila mini" style="gap:3px;background:${tecs.includes(t.id) ? 'var(--azul-claro)' : 'var(--campo)'};
-                    border:1px solid var(--borde);border-radius:14px;padding:2px 9px;cursor:pointer">
-                    <input type="checkbox" style="width:auto" disabled=${!edServ} checked=${tecs.includes(t.id)}
-                      onChange=${e => setTecs(e.target.checked ? [...tecs, t.id] : tecs.filter(x => x !== t.id))} />
-                    ${t.nombre}</label>`)}
-              </div>
-            <//>
             <${Txt} rot="Observaciones del servicio" area=${3} valor=${b.obs_servicio}
               alCambiar=${v => c('obs_servicio', v)} disabled=${!edObs} />
-            <${Txt} rot="Comentarios internos" area=${2} valor=${b.comentarios}
-              alCambiar=${v => c('comentarios', v)} disabled=${!edObs} />
+            ${nuevo
+              ? html`<details>
+                  <summary class="mini" style="cursor:pointer;margin:2px 0 8px">
+                    Estado, fecha de visita, técnico y comentarios internos — se completa luego</summary>
+                  ${restoAtencion}
+                </details>`
+              : html`<div>${restoAtencion}</div>`}
           </fieldset>
         </div>`}
 
@@ -4369,6 +4385,7 @@ function HistorialImprimible({ equipoId, alCerrar }) {
   const eq = s.equipos.find(e => e.id === equipoId);
   const cli = eq && s.clientes.find(c => c.id === eq.cliente_id);
   const [desde, setDesde] = useState('');
+  const caja = useRef(null);            // la caja que se desplaza de costado
 
   useEffect(() => {
     document.body.classList.add('imprimiendo');
@@ -4414,7 +4431,7 @@ function HistorialImprimible({ equipoId, alCerrar }) {
           </div>
         </div>
 
-        <div class="tabla-caja" style="max-height:none">
+        <div class="tabla-caja" style="max-height:none" ref=${caja}>
           <table class="grilla planilla">
             <colgroup>
               <col style="width:7%" /><col style="width:11%" /><col style="width:10%" />
@@ -4442,6 +4459,7 @@ function HistorialImprimible({ equipoId, alCerrar }) {
               </tr>`)}
             </tbody>
           </table>
+          <${Deslizador} para=${caja} />
         </div>
         ${!lista.length && html`<div class="vacio">Todavía no hay trabajos cumplidos en este equipo.</div>`}
 
@@ -5013,6 +5031,7 @@ const MODELOS = ['750', '933', '1316'];
 
 function Repuestos() {
   const s = useS();
+  const caja = useRef(null);            // la caja que se desplaza de costado
   const [busca, setBusca] = useState('');
   const [editando, setEditando] = useState(null);
   /* la celda de precio que se está tocando ahora mismo: "12|933" */
@@ -5192,7 +5211,7 @@ function Repuestos() {
         <div>Emitido el ${fecha(hoyISO(), 1)}</div>
       </div>
     </div>
-    <div class="tabla-caja panel">
+    <div class="tabla-caja panel" ref=${caja}>
       <table class="grilla tabla-repuestos">
         <thead>
           <tr>
@@ -5247,6 +5266,7 @@ function Repuestos() {
         </tbody>
       </table>
       ${!lista.length && html`<div class="vacio">No hay repuestos que coincidan.</div>`}
+      <${Deslizador} para=${caja} />
     </div>
     ${modoImpresion === 'elegidos' && html`<div class="solo-impresion aclaracion">
       <b>Importante</b>
@@ -5405,6 +5425,7 @@ function Cobranza() {
      desmarca solo apenas se cambia de vista o de búsqueda a propósito. */
   const [destacado, setDestacado] = useState(null);
   const filaDestacadaRef = useRef(null);
+  const caja = useRef(null);            // la caja que se desplaza de costado
   useEffect(() => {
     if (destacado && filaDestacadaRef.current) {
       filaDestacadaRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -5632,7 +5653,7 @@ function Cobranza() {
       </div>
     </div>
 
-    <div class="tabla-caja panel">
+    <div class="tabla-caja panel" ref=${caja}>
       <table class="grilla">
         <thead><tr>
           ${editable && html`<th class="no-imprimir" style="width:24px">
@@ -5767,6 +5788,7 @@ function Cobranza() {
       ${filtrados.length > tope && html`<div style="padding:10px;text-align:center">
         <button class="btn sec" onClick=${() => setTope(tope + 500)}>
           Mostrar más (${(filtrados.length - tope).toLocaleString('es-AR')} restantes)</button></div>`}
+      <${Deslizador} para=${caja} />
     </div>
     ${fichaId && html`<${Ficha} id=${fichaId} alCerrar=${() => setFichaId(null)} />`}
     ${verFacturar && html`<${TablaFacturar} trabajos=${seleccionados} alCerrar=${() => setVerFacturar(false)} />`}
@@ -5783,6 +5805,7 @@ function Cobranza() {
    referencia para identificar cada caso sin ambigüedad).
    --------------------------------------------------------------------- */
 function TablaFacturar({ trabajos, alCerrar }) {
+  const caja = useRef(null);            // la caja que se desplaza de costado
   useEffect(() => {
     document.body.classList.add('imprimiendo');
     return () => document.body.classList.remove('imprimiendo');
@@ -5822,7 +5845,7 @@ function TablaFacturar({ trabajos, alCerrar }) {
           <div class="mini der">Emitido el ${fecha(hoyISO(), 1)}</div>
         </div>
 
-        <div class="tabla-caja" style="max-height:none">
+        <div class="tabla-caja" style="max-height:none" ref=${caja}>
           <table class="grilla planilla">
             <thead><tr>
               <th>N° LL</th><th>Cliente</th><th>CUIT/CUIL/DNI</th><th>N° Serie</th>
@@ -5845,6 +5868,7 @@ function TablaFacturar({ trabajos, alCerrar }) {
               </tr>
             </tbody>
           </table>
+          <${Deslizador} para=${caja} />
         </div>
         ${!filas.length && html`<div class="vacio">No hay casos seleccionados.</div>`}
 
@@ -7519,6 +7543,7 @@ function Tablero() {
    ===================================================================== */
 function Cartera() {
   const s = useS();
+  const caja = useRef(null);            // la caja que se desplaza de costado
   const [busca, setBusca] = useState('');
   const [modo, setModo] = useState('clientes');      // clientes | equipos
   const [abierto, setAbierto] = useState({});        // clientes desplegados
@@ -7650,7 +7675,7 @@ function Cartera() {
     </div>
 
     ${modo === 'clientes' ? html`
-      <div class="tabla-caja panel">
+      <div class="tabla-caja panel" ref=${caja}>
         <table class="grilla">
           <thead><tr>
             <th class="congelada" style="min-width:230px">Cliente</th>
@@ -7696,10 +7721,11 @@ function Cartera() {
           </tbody>
         </table>
         ${!clientes.length && html`<div class="vacio">Ningún cliente coincide con la búsqueda.</div>`}
+        <${Deslizador} para=${caja} />
       </div>
       <div class="mini" style="padding:8px 2px">Tocá un cliente para ver sus equipos; tocá un equipo para abrir su ficha e historial.</div>
     ` : html`
-      <div class="tabla-caja panel">
+      <div class="tabla-caja panel" ref=${caja}>
         <table class="grilla">
           <thead><tr>
             <th class="congelada">N° Serie</th><th>Mod.</th><th>Par.</th><th>Motoriz.</th><th>Puerta</th>
@@ -7722,6 +7748,7 @@ function Cartera() {
           </tbody>
         </table>
         ${!equipos.length && html`<div class="vacio">Ningún equipo coincide con la búsqueda.</div>`}
+        <${Deslizador} para=${caja} />
       </div>
     `}
 
