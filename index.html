@@ -1719,6 +1719,9 @@ function puedeCotizacion() { return enRol('admin', 'oficina', 'carga', 'cobranza
 /** marcar encuestas como enviadas */
 function puedeEncuestas() { return enRol('admin', 'oficina', 'carga'); }
 function puedeCrear()    { return enRol('admin', 'oficina', 'carga'); }
+/** exportar la planilla de Planificación RRHH del Registro de Service:
+    sólo Augusto (admin) y Mateo (carga) -- ni oficina, ni cobranza, ni lectura */
+function puedePlanificacionRRHH() { return enRol('admin', 'carga'); }
 /** cualquier permiso de edición (para mostrar u ocultar el botón Guardar) */
 function puedeEditar()   { return !enRol('lectura', 'consulta'); }
 
@@ -2713,6 +2716,62 @@ async function exportarTrabajos(filas, filtro, verPlata) {
   }
 }
 
+/* ---------------------------------------------------------------------
+   PLANIFICACIÓN RRHH
+   Una planilla aparte, con sólo las columnas que hacen falta para
+   organizar quién va a cada trabajo: desde N° Serie hasta Fecha Pedido
+   (el mismo bloque "qué hay que hacer y dónde" de COLS_REGISTRO) más el
+   técnico asignado, que ahí no entra porque cae más adelante en esa
+   lista. Nada de precios, facturación ni cobro: esto es planificación,
+   no plata. Sólo la usan Augusto y Mateo (puedePlanificacionRRHH()).
+   --------------------------------------------------------------------- */
+const COLS_RRHH = [
+  ['N° Serie',      t => t.n_serie],
+  ['Modelo',        t => t.modelo],
+  ['N° Paradas',    t => t.n_paradas],
+  ['Motorización',  t => t.motorizacion],
+  ['Puerta',        t => t.puerta],
+  ['Cliente',       t => t.cliente_nombre],
+  ['Ciudad',        t => ciudadDe(t)],
+  ['Provincia',     t => provinciaDe(t)],
+  ['Dirección',     t => direccionDe(t)],
+  ['Teléfono',      t => t.cliente_telefono],
+  ['Fecha Pedido',  t => t.fecha_pedido && { f: t.fecha_pedido }],
+  ['Técnico',       t => t.tecnicos],
+];
+
+function nombrePlanificacionRRHH(f) {
+  const partes = [];
+  if (f.tipo_pedido) partes.push(f.tipo_pedido);
+  else if (f.tipo_servicio) partes.push(f.tipo_servicio);
+  if (f.estado) partes.push(f.estado);
+  if (f.tecnico) partes.push(f.tecnico);
+  if (f.desde || f.hasta) partes.push([f.desde, f.hasta].filter(Boolean).join(' a '));
+  else if (f.anio && f.mes) partes.push(MESES[Number(f.mes) - 1] + ' ' + f.anio);
+  else if (f.mes) partes.push(MESES[Number(f.mes) - 1]);
+  else if (f.anio) partes.push(f.anio);
+  const base = partes.length ? partes.join(' - ') : 'todos';
+  return ('Planificación RRHH - ' + base).replace(/[\\/:*?"<>|]/g, ' ').slice(0, 90);
+}
+
+async function exportarPlanificacionRRHH(filas, filtro) {
+  if (!filas.length) return toast('No hay registros para exportar con ese filtro', 'error');
+  toast(`Armando la planilla de Planificación RRHH con ${filas.length} registros…`);
+  try {
+    const val = (col, t) => { const v = col[1](t); return v === undefined || v === false ? null : v; };
+    const hojas = [
+      { nombre: 'Planificación RRHH',
+        columnas: COLS_RRHH.map(c => c[0]),
+        filas: filas.map(t => COLS_RRHH.map(c => val(c, t))) },
+      hojaDelFiltro(filtro, filas.length),
+    ];
+    await bajarXlsx(nombrePlanificacionRRHH(filtro) + '.xlsx', hojas);
+    toast(`Exportados ${filas.length} registros`, 'ok');
+  } catch (e) {
+    toast('No se pudo exportar: ' + (e.message || e), 'error');
+  }
+}
+
 async function descargarRespaldo() {
   toast('Generando el respaldo…');
   try {
@@ -3226,6 +3285,9 @@ function Trabajos() {
           <button class="btn sec chico" title=${`Descarga en Excel los ${filtrados.length} registros que estás viendo, con toda la información`}
             onClick=${() => exportarTrabajos(filtrados, f, verPlata)}>
             Exportar (${filtrados.length.toLocaleString('es-AR')})</button>
+          ${puedePlanificacionRRHH() && html`<button class="btn sec chico"
+            title="Descarga una planilla aparte, de N° Serie a Fecha Pedido más el técnico asignado: sólo lo que hace falta para planificar quién va a cada trabajo"
+            onClick=${() => exportarPlanificacionRRHH(filtrados, f)}>Planificación RRHH</button>`}
           ${puedeCrear() && html`<button class="btn chico" onClick=${() => setNuevo(true)}>+ Nuevo trabajo</button>`}
         </div>
       </div>
@@ -4613,6 +4675,8 @@ function Giras() {
           <//>
           <${Sel} rot="Vehículo" valor=${gira.vehiculo} opts=${opciones('vehiculo')} disabled=${!editable}
             alCambiar=${v => actualizarGira({ vehiculo: v })} />
+          <${Txt} rot="Código de viaje" valor=${gira.codigo_viaje} disabled=${!editable}
+            alCambiar=${v => actualizarGira({ codigo_viaje: v })} />
           <${Txt} rot="Efectivo entregado al técnico ($)" tipo="number" valor=${gira.viaticos}
             disabled=${!esAdmin()}
             alCambiar=${v => actualizarGira({ viaticos: v, viaticos_entregados: Number(v) > 0 })} />
@@ -4946,6 +5010,7 @@ function HojaRuta({ gira, paradas, alCerrar }) {
           <div><b>Técnico${tec2 ? ' 1' : ''}:</b> ${tec ? tec.nombre : '—'}</div>
           ${tec2 && html`<div><b>Técnico 2:</b> ${tec2.nombre}</div>`}
           <div><b>Vehículo:</b> ${gira.vehiculo || '—'}</div>
+          <div><b>Código de viaje:</b> ${gira.codigo_viaje || '—'}</div>
           <div><b>Viáticos entregados:</b> ${plata(gira.viaticos) || '—'}</div>
         </div>
       </div>
@@ -4982,6 +5047,7 @@ function HojaRuta({ gira, paradas, alCerrar }) {
             <div><b>Técnico${tec2 ? ' 1' : ''}:</b> ${tec ? tec.nombre : '—'}</div>
             ${tec2 && html`<div><b>Técnico 2:</b> ${tec2.nombre}</div>`}
             <div><b>Vehículo:</b> ${gira.vehiculo || '—'}</div>
+            <div><b>Código de viaje:</b> ${gira.codigo_viaje || '—'}</div>
             <div><b>Viáticos entregados:</b> ${plata(gira.viaticos) || '—'}</div>
           </div>
         </div>
@@ -5818,7 +5884,10 @@ function TablaFacturar({ trabajos, alCerrar }) {
 
   const cols = [
     { rot: 'N° LL', val: t => t.n_llamada }, { rot: 'Cliente', val: t => t.cliente_nombre },
-    { rot: 'CUIT/CUIL/DNI', val: t => t.cliente_cuit }, { rot: 'N° Serie', val: t => t.n_serie },
+    { rot: 'CUIT/CUIL/DNI', val: t => t.cliente_cuit },
+    { rot: 'Correo', val: t => t.cliente_correo }, { rot: 'Teléfono', val: t => t.cliente_telefono },
+    { rot: 'Tipo de factura', val: t => t.tipo_factura },
+    { rot: 'N° Serie', val: t => t.n_serie },
     { rot: 'Concepto', val: t => t.concepto },
     { rot: 'Precio sin IVA', val: t => t.precio_sin_iva },
     { rot: 'Precio con IVA', val: t => Math.round((Number(t.precio_sin_iva) || 0) * (1 + ivaDe(t) / 100)) },
@@ -5848,7 +5917,8 @@ function TablaFacturar({ trabajos, alCerrar }) {
         <div class="tabla-caja" style="max-height:none" ref=${caja}>
           <table class="grilla planilla">
             <thead><tr>
-              <th>N° LL</th><th>Cliente</th><th>CUIT/CUIL/DNI</th><th>N° Serie</th>
+              <th>N° LL</th><th>Cliente</th><th>CUIT/CUIL/DNI</th>
+              <th>Correo</th><th>Teléfono</th><th>Tipo de factura</th><th>N° Serie</th>
               <th>Concepto</th><th class="der">Sin IVA</th><th class="der">Con IVA</th>
             </tr></thead>
             <tbody>
@@ -5856,13 +5926,16 @@ function TablaFacturar({ trabajos, alCerrar }) {
                 <td><b>${t.n_llamada || '#' + t.id}</b></td>
                 <td>${t.cliente_nombre || ''}</td>
                 <td>${t.cliente_cuit || ''}</td>
+                <td>${t.cliente_correo || ''}</td>
+                <td>${t.cliente_telefono || ''}</td>
+                <td>${t.tipo_factura || ''}</td>
                 <td>${t.n_serie || ''}</td>
                 <td class="largo">${t.concepto || ''}</td>
                 <td class="num">${plata(t.precio_sin_iva)}</td>
                 <td class="num">${plata((Number(t.precio_sin_iva) || 0) * (1 + ivaDe(t) / 100))}</td>
               </tr>`)}
               <tr style="border-top:2px solid var(--borde)">
-                <td colspan="5" class="der"><b>Totales</b></td>
+                <td colspan="8" class="der"><b>Totales</b></td>
                 <td class="num"><b>${plata(totalSinIva)}</b></td>
                 <td class="num"><b>${plata(totalConIva)}</b></td>
               </tr>
