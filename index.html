@@ -4553,9 +4553,44 @@ function Giras() {
       toast(`${t.cliente_nombre || 'Trabajo'} agendado para el ${fechaLarga(dia)}`, 'ok');
     } catch (e) { toast('No se pudo agregar: ' + e.message, 'error'); }
   }
+  /** Sacar un trabajo de la gira es lo inverso de agregar(): si estaba
+      PROGRAMADO (o sea, estaba PENDIENTE antes de agendarse) vuelve a
+      PENDIENTE y a la lista de trabajos pendientes de la izquierda. Un
+      trabajo que ya estaba EN REVISIÓN o REPROGRAMAR al agendarse
+      conserva ese estado especial, igual que al agregarlo. */
   async function quitar(t) {
-    try { await guardarTrabajo(t.id, { gira_id: null, orden_gira: null }); }
-    catch (e) { toast('No se pudo quitar: ' + e.message, 'error'); }
+    try {
+      const campos = { gira_id: null, orden_gira: null };
+      if (t.estado === 'PROGRAMADO') campos.estado = 'PENDIENTE';
+      await guardarTrabajo(t.id, campos);
+      toast(`${t.cliente_nombre || 'Trabajo'} sacado de la gira` + (campos.estado ? ' y vuelto a pendiente' : ''), 'ok');
+    } catch (e) { toast('No se pudo quitar: ' + e.message, 'error'); }
+  }
+  /* Eliminar la semana entera: primero desasigna todos sus trabajos --
+     vuelven a pendientes igual que si se sacaran uno por uno con
+     quitar() -- y recién ahí borra la fila de la gira. Sólo el
+     administrador puede eliminar una semana. */
+  async function eliminarGira() {
+    if (!gira) return;
+    const aviso = paradas.length
+      ? `Esta semana tiene ${paradas.length} trabajo${paradas.length > 1 ? 's' : ''} asignado${paradas.length > 1 ? 's' : ''}: `
+        + 'al eliminarla, todos vuelven a quedar pendientes y sin fecha.\n\n'
+      : '';
+    if (!confirm(`${aviso}¿Eliminar la semana ${gira.n_semana || ''} (${gira.zona || 'sin zona'})? `
+      + 'Esta acción no se puede deshacer.\n\n¿Continuar?')) return;
+    try {
+      await Promise.all(paradas.map(t => {
+        const campos = { gira_id: null, orden_gira: null };
+        if (t.estado === 'PROGRAMADO') campos.estado = 'PENDIENTE';
+        return guardarTrabajo(t.id, campos);
+      }));
+      const { error } = await cliente().from('giras').delete().eq('id', giraId);
+      if (error) throw error;
+      const restantes = S.giras.filter(g => g.id !== giraId);
+      set({ giras: restantes });
+      setGiraId(restantes[0] ? restantes[0].id : null);
+      toast('Semana eliminada', 'ok');
+    } catch (e) { toast('No se pudo eliminar la semana: ' + (e.message || e), 'error'); }
   }
   async function moverDia(t, iso) {
     try { await guardarTrabajo(t.id, { fecha_visita: iso }); }
@@ -4588,6 +4623,8 @@ function Giras() {
           </option>`)}
         </select>
         ${editable && html`<button class="btn sec chico" onClick=${() => setNueva(true)}>+ Nueva gira</button>`}
+        ${esAdmin() && gira && html`<button class="btn sec chico borrar" title="Eliminar esta semana de gira (solo administrador)"
+          onClick=${eliminarGira}>🗑 Eliminar semana</button>`}
         <div style="margin-left:auto" class="fila">
           ${puedePlanificacionRRHH() && html`<button class="btn sec" disabled=${!paradas.length}
             title="Planilla imprimible para RR.HH., con quién hace cada trabajo de esta gira"
@@ -5081,8 +5118,7 @@ function PlanificacionRRHH({ gira, paradas, alCerrar }) {
           <div class="mini">Semana del ${fecha(gira.fecha_desde, 1)}${gira.fecha_hasta ? ' al ' + fecha(gira.fecha_hasta, 1) : ''}</div>
         </div>
         <div class="mini der">
-          <div><b>Generado por:</b> ${nombreUsuario()}</div>
-          <div><b>Trabajos:</b> ${paradas.length}</div>
+          <div style="font-size:15px"><b>Viáticos entregados:</b> ${plata(gira.viaticos) || '—'}</div>
         </div>
       </div>
     </th>
@@ -5116,8 +5152,7 @@ function PlanificacionRRHH({ gira, paradas, alCerrar }) {
             <div class="mini">Semana del ${fecha(gira.fecha_desde, 1)}${gira.fecha_hasta ? ' al ' + fecha(gira.fecha_hasta, 1) : ''}</div>
           </div>
           <div class="mini der">
-            <div><b>Generado por:</b> ${nombreUsuario()}</div>
-            <div><b>Trabajos:</b> ${paradas.length}</div>
+            <div style="font-size:15px"><b>Viáticos entregados:</b> ${plata(gira.viaticos) || '—'}</div>
           </div>
         </div>
         <div class="mini no-imprimir" style="margin:-6px 0 10px">En la hoja impresa este
