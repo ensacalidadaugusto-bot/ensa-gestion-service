@@ -2718,12 +2718,14 @@ async function exportarTrabajos(filas, filtro, verPlata) {
 
 /* ---------------------------------------------------------------------
    PLANIFICACIÓN RRHH
-   Una planilla aparte, con sólo las columnas que hacen falta para
-   organizar quién va a cada trabajo: desde N° Serie hasta Fecha Pedido
-   (el mismo bloque "qué hay que hacer y dónde" de COLS_REGISTRO) más el
-   técnico asignado, que ahí no entra porque cae más adelante en esa
-   lista. Nada de precios, facturación ni cobro: esto es planificación,
-   no plata. Sólo la usan Augusto y Mateo (puedePlanificacionRRHH()).
+   Se descarga desde la Hoja de ruta (la planilla de trabajos imprimible
+   de una gira/semana): una planilla aparte, con sólo las columnas que
+   hacen falta para organizar quién va a cada trabajo, de las paradas de
+   ESA gira -- desde N° Serie hasta Fecha Pedido (el mismo bloque "qué
+   hay que hacer y dónde" de COLS_REGISTRO) más el técnico asignado, que
+   ahí no entra porque cae más adelante en esa lista. Nada de precios,
+   facturación ni cobro: esto es planificación, no plata. Sólo la usan
+   Augusto y Mateo (puedePlanificacionRRHH()).
    --------------------------------------------------------------------- */
 const COLS_RRHH = [
   ['N° Serie',      t => t.n_serie],
@@ -2740,22 +2742,31 @@ const COLS_RRHH = [
   ['Técnico',       t => t.tecnicos],
 ];
 
-function nombrePlanificacionRRHH(f) {
+function nombrePlanificacionRRHH(gira) {
   const partes = [];
-  if (f.tipo_pedido) partes.push(f.tipo_pedido);
-  else if (f.tipo_servicio) partes.push(f.tipo_servicio);
-  if (f.estado) partes.push(f.estado);
-  if (f.tecnico) partes.push(f.tecnico);
-  if (f.desde || f.hasta) partes.push([f.desde, f.hasta].filter(Boolean).join(' a '));
-  else if (f.anio && f.mes) partes.push(MESES[Number(f.mes) - 1] + ' ' + f.anio);
-  else if (f.mes) partes.push(MESES[Number(f.mes) - 1]);
-  else if (f.anio) partes.push(f.anio);
-  const base = partes.length ? partes.join(' - ') : 'todos';
+  if (gira.n_semana) partes.push(`Semana ${gira.n_semana}`);
+  if (gira.zona) partes.push(gira.zona);
+  const base = partes.length ? partes.join(' - ') : 'sin semana';
   return ('Planificación RRHH - ' + base).replace(/[\\/:*?"<>|]/g, ' ').slice(0, 90);
 }
 
-async function exportarPlanificacionRRHH(filas, filtro) {
-  if (!filas.length) return toast('No hay registros para exportar con ese filtro', 'error');
+/** Deja constancia de a qué gira corresponde la planilla, igual que
+    hojaDelFiltro() para las exportaciones de Registro de Service. */
+function hojaDeLaGira(gira, cantidad) {
+  const filas = [['Generado el', momento(new Date().toISOString())],
+                 ['Generado por', nombreUsuario()],
+                 ['Registros exportados', cantidad],
+                 ['Semana', gira.n_semana || '—'],
+                 ['Zona', gira.zona || '—']];
+  if (gira.fecha_desde || gira.fecha_hasta) {
+    filas.push(['Período', (gira.fecha_desde ? 'desde ' + fecha(gira.fecha_desde, 1) : '')
+      + (gira.fecha_hasta ? ' hasta ' + fecha(gira.fecha_hasta, 1) : '')]);
+  }
+  return { nombre: 'Cómo se armó', columnas: ['Dato', 'Valor'], filas };
+}
+
+async function exportarPlanificacionRRHH(filas, gira) {
+  if (!filas.length) return toast('Esta gira todavía no tiene trabajos para exportar', 'error');
   toast(`Armando la planilla de Planificación RRHH con ${filas.length} registros…`);
   try {
     const val = (col, t) => { const v = col[1](t); return v === undefined || v === false ? null : v; };
@@ -2763,9 +2774,9 @@ async function exportarPlanificacionRRHH(filas, filtro) {
       { nombre: 'Planificación RRHH',
         columnas: COLS_RRHH.map(c => c[0]),
         filas: filas.map(t => COLS_RRHH.map(c => val(c, t))) },
-      hojaDelFiltro(filtro, filas.length),
+      hojaDeLaGira(gira, filas.length),
     ];
-    await bajarXlsx(nombrePlanificacionRRHH(filtro) + '.xlsx', hojas);
+    await bajarXlsx(nombrePlanificacionRRHH(gira) + '.xlsx', hojas);
     toast(`Exportados ${filas.length} registros`, 'ok');
   } catch (e) {
     toast('No se pudo exportar: ' + (e.message || e), 'error');
@@ -3285,9 +3296,6 @@ function Trabajos() {
           <button class="btn sec chico" title=${`Descarga en Excel los ${filtrados.length} registros que estás viendo, con toda la información`}
             onClick=${() => exportarTrabajos(filtrados, f, verPlata)}>
             Exportar (${filtrados.length.toLocaleString('es-AR')})</button>
-          ${puedePlanificacionRRHH() && html`<button class="btn sec chico"
-            title="Descarga una planilla aparte, de N° Serie a Fecha Pedido más el técnico asignado: sólo lo que hace falta para planificar quién va a cada trabajo"
-            onClick=${() => exportarPlanificacionRRHH(filtrados, f)}>Planificación RRHH</button>`}
           ${puedeCrear() && html`<button class="btn chico" onClick=${() => setNuevo(true)}>+ Nuevo trabajo</button>`}
         </div>
       </div>
@@ -5032,6 +5040,9 @@ function HojaRuta({ gira, paradas, alCerrar }) {
           title="Las 17 columnas entran siempre en el ancho de la hoja; con letra muy grande alguna palabra larga se parte en dos renglones.">
           Con letra ${tam} alguna palabra larga se parte: con ${tam - 1} entra más holgado.</span>`}
         <div style="margin-left:auto" class="fila">
+          ${puedePlanificacionRRHH() && html`<button class="btn sec"
+            title="Descarga una planilla aparte para RR.HH., con los trabajos de esta gira: de N° Serie a Fecha Pedido más el técnico asignado a cada uno"
+            onClick=${() => exportarPlanificacionRRHH(paradas, gira)}>Planificación RRHH</button>`}
           <button class="btn" onClick=${() => window.print()}>Imprimir / guardar PDF</button>
           <button class="btn sec" onClick=${alCerrar}>Cerrar</button>
         </div>
