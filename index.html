@@ -2716,73 +2716,6 @@ async function exportarTrabajos(filas, filtro, verPlata) {
   }
 }
 
-/* ---------------------------------------------------------------------
-   PLANIFICACIÓN RRHH
-   Se descarga desde la Hoja de ruta (la planilla de trabajos imprimible
-   de una gira/semana): una planilla aparte, con sólo las columnas que
-   hacen falta para organizar quién va a cada trabajo, de las paradas de
-   ESA gira -- desde N° Serie hasta Fecha Pedido (el mismo bloque "qué
-   hay que hacer y dónde" de COLS_REGISTRO) más el técnico asignado, que
-   ahí no entra porque cae más adelante en esa lista. Nada de precios,
-   facturación ni cobro: esto es planificación, no plata. Sólo la usan
-   Augusto y Mateo (puedePlanificacionRRHH()).
-   --------------------------------------------------------------------- */
-const COLS_RRHH = [
-  ['N° Serie',      t => t.n_serie],
-  ['Modelo',        t => t.modelo],
-  ['N° Paradas',    t => t.n_paradas],
-  ['Motorización',  t => t.motorizacion],
-  ['Puerta',        t => t.puerta],
-  ['Cliente',       t => t.cliente_nombre],
-  ['Ciudad',        t => ciudadDe(t)],
-  ['Provincia',     t => provinciaDe(t)],
-  ['Dirección',     t => direccionDe(t)],
-  ['Teléfono',      t => t.cliente_telefono],
-  ['Fecha Pedido',  t => t.fecha_pedido && { f: t.fecha_pedido }],
-  ['Técnico',       t => t.tecnicos],
-];
-
-function nombrePlanificacionRRHH(gira) {
-  const partes = [];
-  if (gira.n_semana) partes.push(`Semana ${gira.n_semana}`);
-  if (gira.zona) partes.push(gira.zona);
-  const base = partes.length ? partes.join(' - ') : 'sin semana';
-  return ('Planificación RRHH - ' + base).replace(/[\\/:*?"<>|]/g, ' ').slice(0, 90);
-}
-
-/** Deja constancia de a qué gira corresponde la planilla, igual que
-    hojaDelFiltro() para las exportaciones de Registro de Service. */
-function hojaDeLaGira(gira, cantidad) {
-  const filas = [['Generado el', momento(new Date().toISOString())],
-                 ['Generado por', nombreUsuario()],
-                 ['Registros exportados', cantidad],
-                 ['Semana', gira.n_semana || '—'],
-                 ['Zona', gira.zona || '—']];
-  if (gira.fecha_desde || gira.fecha_hasta) {
-    filas.push(['Período', (gira.fecha_desde ? 'desde ' + fecha(gira.fecha_desde, 1) : '')
-      + (gira.fecha_hasta ? ' hasta ' + fecha(gira.fecha_hasta, 1) : '')]);
-  }
-  return { nombre: 'Cómo se armó', columnas: ['Dato', 'Valor'], filas };
-}
-
-async function exportarPlanificacionRRHH(filas, gira) {
-  if (!filas.length) return toast('Esta gira todavía no tiene trabajos para exportar', 'error');
-  toast(`Armando la planilla de Planificación RRHH con ${filas.length} registros…`);
-  try {
-    const val = (col, t) => { const v = col[1](t); return v === undefined || v === false ? null : v; };
-    const hojas = [
-      { nombre: 'Planificación RRHH',
-        columnas: COLS_RRHH.map(c => c[0]),
-        filas: filas.map(t => COLS_RRHH.map(c => val(c, t))) },
-      hojaDeLaGira(gira, filas.length),
-    ];
-    await bajarXlsx(nombrePlanificacionRRHH(gira) + '.xlsx', hojas);
-    toast(`Exportados ${filas.length} registros`, 'ok');
-  } catch (e) {
-    toast('No se pudo exportar: ' + (e.message || e), 'error');
-  }
-}
-
 async function descargarRespaldo() {
   toast('Generando el respaldo…');
   try {
@@ -4572,6 +4505,7 @@ function Giras() {
   const [giraId, setGiraId] = useState(() => (s.giras[0] && s.giras[0].id) || null);
   const [busca, setBusca] = useState('');
   const [imprimir, setImprimir] = useState(false);
+  const [verRRHH, setVerRRHH] = useState(false);
   const [nueva, setNueva] = useState(false);
   const [fichaId, setFichaId] = useState(null);
   const [asignando, setAsignando] = useState(null);   // trabajo al que se le elige el día
@@ -4655,6 +4589,9 @@ function Giras() {
         </select>
         ${editable && html`<button class="btn sec chico" onClick=${() => setNueva(true)}>+ Nueva gira</button>`}
         <div style="margin-left:auto" class="fila">
+          ${puedePlanificacionRRHH() && html`<button class="btn sec" disabled=${!paradas.length}
+            title="Planilla imprimible para RR.HH., con quién hace cada trabajo de esta gira"
+            onClick=${() => setVerRRHH(true)}>🖨 Planificación RRHH</button>`}
           <button class="btn" disabled=${!paradas.length}
             onClick=${() => setImprimir(true)}>🖨 Imprimir planilla de trabajos</button>
         </div>
@@ -4780,6 +4717,7 @@ function Giras() {
     <//>`}
 
     ${imprimir && gira && html`<${HojaRuta} gira=${gira} paradas=${paradas} alCerrar=${() => setImprimir(false)} />`}
+    ${verRRHH && gira && html`<${PlanificacionRRHH} gira=${gira} paradas=${paradas} alCerrar=${() => setVerRRHH(false)} />`}
     ${nueva && html`<${NuevaGira} alCerrar=${id => { setNueva(false); if (id) setGiraId(id); }} />`}
     ${fichaId && html`<${Ficha} id=${fichaId} alCerrar=${() => setFichaId(null)} />`}
   </div>`;
@@ -4938,11 +4876,13 @@ function anchosPlanilla(columnas, filas, disponible, tam) {
   return anchos.map((a, i) => a + sobra * (ganas[i] / totalGanas));
 }
 
-/** La letra más grande con la que las 17 columnas entran en la hoja sin que
-    se corte ninguna palabra (mismo criterio que la "holgura" de abajo). */
-function tamañoRecomendado(paradas) {
+/** La letra más grande con la que las columnas entran en la hoja sin que
+    se corte ninguna palabra (mismo criterio que la "holgura" de abajo).
+    Sirve tanto para la Planilla de trabajos (COLS_HOJA) como para
+    Planificación RRHH (COLS_RRHH_HOJA), pasando otras columnas. */
+function tamañoRecomendado(paradas, columnas = COLS_HOJA) {
   for (let t = 16; t >= 9; t--) {
-    const suma = COLS_HOJA.reduce((a, [rot, val]) =>
+    const suma = columnas.reduce((a, [rot, val]) =>
       a + medidasColumna(rot, paradas.map(f => val(f)), t, rot === 'OBSERVACIONES').minimo, 0);
     if (suma <= 1072) return t;
   }
@@ -5040,9 +4980,6 @@ function HojaRuta({ gira, paradas, alCerrar }) {
           title="Las 17 columnas entran siempre en el ancho de la hoja; con letra muy grande alguna palabra larga se parte en dos renglones.">
           Con letra ${tam} alguna palabra larga se parte: con ${tam - 1} entra más holgado.</span>`}
         <div style="margin-left:auto" class="fila">
-          ${puedePlanificacionRRHH() && html`<button class="btn sec"
-            title="Descarga una planilla aparte para RR.HH., con los trabajos de esta gira: de N° Serie a Fecha Pedido más el técnico asignado a cada uno"
-            onClick=${() => exportarPlanificacionRRHH(paradas, gira)}>Planificación RRHH</button>`}
           <button class="btn" onClick=${() => window.print()}>Imprimir / guardar PDF</button>
           <button class="btn sec" onClick=${alCerrar}>Cerrar</button>
         </div>
@@ -5099,6 +5036,112 @@ function HojaRuta({ gira, paradas, alCerrar }) {
   </div>`;
 }
 
+/* ---------- Planificación RRHH: planilla imprimible, no Excel -----------
+   Mismo mecanismo que la Planilla de trabajos (HojaRuta) de arriba, pero
+   con sólo las columnas que hacen falta para organizar quién va a cada
+   trabajo de la gira: desde N° Serie hasta Fecha Pedido (el mismo bloque
+   "qué hay que hacer y dónde" de COLS_HOJA) más el técnico asignado.
+   Nada de precios, facturación ni cobro: esto es planificación, no plata.
+   Sólo la ven Augusto y Mateo (puedePlanificacionRRHH()). ------------- */
+const COLS_RRHH_HOJA = [
+  ['N° Serie',      t => t.n_serie,               58,  0, 'corta'],
+  ['Modelo',        t => t.modelo,                55,  0, 'corta'],
+  ['N° Paradas',    t => t.n_paradas,             48,  0, 'corta'],
+  ['Motorización',  t => t.motorizacion,          70,  0, 'corta'],
+  ['Puerta',        t => t.puerta,                60,  0, 'corta'],
+  ['Cliente',       t => t.cliente_nombre,        170, 0],
+  ['Ciudad',        t => ciudadDe(t),              90, 0],
+  ['Provincia',     t => provinciaDe(t),           90, 0],
+  ['Dirección',     t => direccionDe(t),          150, 0],
+  ['Teléfono',      t => t.cliente_telefono,      100, 0],
+  ['Fecha Pedido',  t => fecha(t.fecha_pedido),    70,  0, 'corta'],
+  ['Técnico',       t => t.tecnicos,              110, 0],
+];
+
+function PlanificacionRRHH({ gira, paradas, alCerrar }) {
+  const recomendado = useMemo(() => tamañoRecomendado(paradas, COLS_RRHH_HOJA), [paradas]);
+  const [tam, setTam] = useState(recomendado);
+  useEffect(() => {
+    document.body.classList.add('imprimiendo');
+    return () => document.body.classList.remove('imprimiendo');
+  }, []);
+
+  const anchos = useMemo(() => anchosPlanilla(COLS_RRHH_HOJA, paradas, 1072, tam), [paradas, tam]);
+  const holgura = useMemo(() => {
+    const m = COLS_RRHH_HOJA.map(([rot, val]) => medidasColumna(rot, paradas.map(f => val(f)), tam, false));
+    return 1072 - m.reduce((a, x) => a + x.minimo, 0);
+  }, [paradas, tam]);
+
+  const filaTitulo = html`<tr class="fila-titulo-planilla">
+    <th colspan=${COLS_RRHH_HOJA.length}>
+      <div class="encabezado-hoja">
+        <div>
+          <img class="logo-hoja" src=${LOGO_NEGRO} alt="ENSA" />
+          <div class="titulo-hoja">Planificación RRHH — ${gira.n_semana ? `Semana ${gira.n_semana}` : 'sin semana'}${gira.zona ? ' en ' + gira.zona : ''}</div>
+          <div class="mini">Semana del ${fecha(gira.fecha_desde, 1)}${gira.fecha_hasta ? ' al ' + fecha(gira.fecha_hasta, 1) : ''}</div>
+        </div>
+        <div class="mini der">
+          <div><b>Generado por:</b> ${nombreUsuario()}</div>
+          <div><b>Trabajos:</b> ${paradas.length}</div>
+        </div>
+      </div>
+    </th>
+  </tr>`;
+
+  const filas = paradas.map(t => html`<tr key=${t.id}>
+    ${COLS_RRHH_HOJA.map(([rot, val, , , corta]) => html`<td class=${corta || ''}>
+      ${rot === 'N° Serie' ? html`<b>${val(t) || ''}</b>` : (val(t) || '')}</td>`)}
+  </tr>`);
+
+  return html`<div class="fondo" style="justify-content:center;align-items:flex-start;padding:14px;overflow:auto">
+    <div class="panel hoja-impresion" style="width:100%;max-width:1300px;background:var(--papel)">
+      <div class="panel-cab no-imprimir">
+        <h2>Planificación RRHH — semana ${gira.n_semana || ''}</h2>
+        <select style="width:auto" value=${tam} onChange=${e => setTam(Number(e.target.value))}>
+          ${[16, 15, 14, 13, 12, 11, 10, 9].map(n => html`<option value=${n}>Letra ${n}${
+            n === recomendado ? ' (recomendada)' : ''}</option>`)}
+        </select>
+        ${holgura < -20 && html`<span class="mini" style="color:var(--alerta)">
+          Con letra ${tam} alguna palabra larga se parte: con ${tam - 1} entra más holgado.</span>`}
+        <div style="margin-left:auto" class="fila">
+          <button class="btn" onClick=${() => window.print()}>Imprimir / guardar PDF</button>
+          <button class="btn sec" onClick=${alCerrar}>Cerrar</button>
+        </div>
+      </div>
+      <div class="panel-cuerpo">
+        <div class="encabezado-hoja no-imprimir">
+          <div>
+            <img class="logo-hoja" src=${LOGO_NEGRO} alt="ENSA" />
+            <div class="titulo-hoja">Planificación RRHH — ${gira.n_semana ? `Semana ${gira.n_semana}` : 'sin semana'}${gira.zona ? ' en ' + gira.zona : ''}</div>
+            <div class="mini">Semana del ${fecha(gira.fecha_desde, 1)}${gira.fecha_hasta ? ' al ' + fecha(gira.fecha_hasta, 1) : ''}</div>
+          </div>
+          <div class="mini der">
+            <div><b>Generado por:</b> ${nombreUsuario()}</div>
+            <div><b>Trabajos:</b> ${paradas.length}</div>
+          </div>
+        </div>
+        <div class="mini no-imprimir" style="margin:-6px 0 10px">En la hoja impresa este
+          encabezado se repite solo al principio de cada página, junto con los títulos de columna.</div>
+
+        ${paradas.length ? html`<div class="tabla-caja" style="max-height:none">
+          <table class="grilla planilla" style=${`font-size:${tam}px`}>
+            <colgroup>
+              ${COLS_RRHH_HOJA.map((c, i) => html`<col style=${`width:${(anchos[i] / 1072 * 100).toFixed(2)}%`} />`)}
+            </colgroup>
+            <thead>
+              ${filaTitulo}
+              <tr>
+                ${COLS_RRHH_HOJA.map(([rot, , ancho, , corta]) => html`<th class=${corta || ''}
+                  style=${`min-width:${ancho}px`}>${rot}</th>`)}
+              </tr>
+            </thead>
+            <tbody>${filas}</tbody>
+          </table>
+        </div>` : html`<div class="vacio">Esta gira todavía no tiene trabajos asignados.</div>`}
+      </div>
+    </div>
+  </div>`;
+}
 
 /* ===== 50_repuestos.js ===== */
 /* =====================================================================
