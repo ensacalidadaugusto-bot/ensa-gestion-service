@@ -2165,7 +2165,13 @@ async function actualizarTrabajo(id, cambios, actualizadoEn, tecnicos) {
   if (navigator.onLine) {
     try {
       await guardarTrabajo(id, cambios, actualizadoEn);
-      if (tecnicos) await guardarTecnicos(id, tecnicos);
+      /* guardarTrabajo() ya refresca la fila desde v_trabajos, pero en ese
+         momento trabajo_tecnicos todavía tiene los técnicos VIEJOS -- recién
+         se actualiza acá abajo. Sin este segundo refresco, tecnico_ids/
+         tecnicos queda un paso atrás en pantalla (aunque en la base ya
+         están bien guardados) hasta el próximo Guardar: el bug de "el
+         técnico no se guarda, hay que hacerlo dos veces". */
+      if (tecnicos) { await guardarTecnicos(id, tecnicos); await refrescarTrabajo(id); }
       return { enCola: false };
     } catch (e) { if (!errorDeRed(e)) throw e; }
   }
@@ -7465,6 +7471,7 @@ function ElevadoresAOfertar() {
   const s = useS();
   const [busca, setBusca] = useState('');
   const [provinciaFiltro, setProvinciaFiltro] = useState('');
+  const [historialId, setHistorialId] = useState(null);
 
   /* Última fecha de un Service o Service Proactivo CUMPLIDO por equipo:
      un solo pase por todos los trabajos, se queda con la más reciente de
@@ -7495,6 +7502,10 @@ function ElevadoresAOfertar() {
       const mesesInstalado = eq.fecha_instalacion ? mesesDesde(eq.fecha_instalacion) : null;
       return {
         eq, cli, ultima, meses, mesesInstalado,
+        // campos sueltos (además de eq/cli) para que ordenar() los encuentre por nombre
+        n_serie: eq.n_serie || '', modelo: eq.modelo || '',
+        cliente: (cli && cli.nombre) || '',
+        fecha_instalacion: eq.fecha_instalacion || '',
         ciudad: eq.ciudad || (cli && cli.ciudad) || '',
         provincia: eq.provincia || (cli && cli.provincia) || '',
         direccion: eq.direccion || (cli && cli.direccion) || '',
@@ -7557,26 +7568,40 @@ function ElevadoresAOfertar() {
       })()}.
     </div></div>`}
 
-    ${porProvincia.map(([prov, lista]) => html`<${TablaOfertar} key=${prov} prov=${prov} lista=${lista} />`)}
+    ${porProvincia.map(([prov, lista]) => html`<${TablaOfertar} key=${prov} prov=${prov} lista=${lista}
+      alAbrir=${setHistorialId} />`)}
+
+    ${historialId && html`<${HistorialImprimible} equipoId=${historialId} alCerrar=${() => setHistorialId(null)} />`}
   </div>`;
 }
 
-/** Una tabla por provincia, cada una con su propio ref para el Deslizador:
-    van varias juntas en pantalla, así que no pueden compartir uno solo. */
-function TablaOfertar({ prov, lista }) {
+/** Una tabla por provincia, cada una con su propio ref para el Deslizador y
+    su propio orden de columna: van varias juntas en pantalla, así que no
+    pueden compartir ni el ref ni el estado de orden. Tocar una fila abre
+    el historial del equipo (alAbrir, que sube hasta ElevadoresAOfertar). */
+function TablaOfertar({ prov, lista, alAbrir }) {
   const caja = useRef(null);
+  const [orden, setOrden] = useState({ campo: 'meses', asc: false });
+  const filas = useMemo(() => ordenar(lista, orden), [lista, orden]);
   return html`<div style="margin-bottom:14px">
     <div class="titulo-dia">${prov} <span class="mini" style="text-transform:none;font-weight:400">
       — ${lista.length} equipo${lista.length > 1 ? 's' : ''}</span></div>
     <div class="tabla-caja panel" ref=${caja}>
       <table class="grilla">
         <thead><tr>
-          <th class="congelada">N° Serie</th><th>Modelo</th><th style="min-width:200px">Cliente</th>
-          <th>Ciudad</th><th style="min-width:170px">Dirección</th><th>Teléfono</th>
-          <th>Fecha de instalación</th><th>Última asistencia</th><th class="der">Meses sin asistencia</th>
+          <${Th} campo="n_serie" rot="N° Serie" orden=${orden} setOrden=${setOrden} clase="congelada" />
+          <${Th} campo="modelo" rot="Modelo" orden=${orden} setOrden=${setOrden} />
+          <${Th} campo="cliente" rot="Cliente" orden=${orden} setOrden=${setOrden} ancho=${200} />
+          <${Th} campo="ciudad" rot="Ciudad" orden=${orden} setOrden=${setOrden} />
+          <${Th} campo="direccion" rot="Dirección" orden=${orden} setOrden=${setOrden} ancho=${170} />
+          <${Th} campo="telefono" rot="Teléfono" orden=${orden} setOrden=${setOrden} />
+          <${Th} campo="fecha_instalacion" rot="Fecha de instalación" orden=${orden} setOrden=${setOrden} />
+          <${Th} campo="ultima" rot="Última asistencia" orden=${orden} setOrden=${setOrden} />
+          <${Th} campo="meses" rot="Meses sin asistencia" orden=${orden} setOrden=${setOrden} clase="der" />
         </tr></thead>
         <tbody>
-          ${lista.map(x => html`<tr key=${x.eq.id}>
+          ${filas.map(x => html`<tr key=${x.eq.id} style="cursor:pointer" title="Ver el historial de este equipo"
+              onClick=${() => alAbrir(x.eq.id)}>
             <td class="congelada"><b>${x.eq.n_serie}</b></td>
             <td>${x.eq.modelo || ''}</td>
             <td>${x.cli ? x.cli.nombre : ''}</td>
