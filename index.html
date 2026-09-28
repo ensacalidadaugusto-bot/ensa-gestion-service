@@ -1515,6 +1515,19 @@ function recienInstalado(t) {
   const d = diasDeInstalado(t);
   return d !== null && Math.abs(d) < DIAS_RECIEN_INSTALADO;
 }
+/** Meses completos transcurridos entre una fecha (ISO) y hoy: cuenta
+    calendario, no promedio de días por mes (del 15 de enero al 14 de
+    febrero todavía es 0; recién el 15 de febrero pasa a ser 1). Se usa
+    para saber hace cuánto que un equipo no recibe una asistencia. */
+function mesesDesde(fechaISO) {
+  if (!fechaISO) return null;
+  const a = new Date(String(fechaISO).slice(0, 10) + 'T12:00:00');
+  const b = new Date(hoyISO() + 'T12:00:00');
+  if (isNaN(a) || isNaN(b)) return null;
+  let meses = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
+  if (b.getDate() < a.getDate()) meses--;
+  return Math.max(0, meses);
+}
 /** Trabajo todavía por hacer: se pinta en amarillo en el registro */
 function porHacer(t) { return t.estado === 'PENDIENTE' || t.estado === 'PROGRAMADO'; }
 
@@ -1722,6 +1735,10 @@ function puedeCrear()    { return enRol('admin', 'oficina', 'carga'); }
 /** exportar la planilla de Planificación RRHH del Registro de Service:
     sólo Augusto (admin) y Mateo (carga) -- ni oficina, ni cobranza, ni lectura */
 function puedePlanificacionRRHH() { return enRol('admin', 'carga'); }
+/** ver el módulo "Elevadores a ofertar" (equipos sin asistencia hace más
+    de 11 meses, candidatos para ofrecerles mantenimiento):
+    sólo Augusto (admin) y Mateo (carga), el mismo dúo de Planificación RRHH */
+function puedeOfertar() { return enRol('admin', 'carga'); }
 /** cualquier permiso de edición (para mostrar u ocultar el botón Guardar) */
 function puedeEditar()   { return !enRol('lectura', 'consulta'); }
 
@@ -5118,6 +5135,7 @@ function PlanificacionRRHH({ gira, paradas, alCerrar }) {
           <div class="mini">Semana del ${fecha(gira.fecha_desde, 1)}${gira.fecha_hasta ? ' al ' + fecha(gira.fecha_hasta, 1) : ''}</div>
         </div>
         <div class="mini der">
+          <div><b>Vehículo:</b> ${gira.vehiculo || '—'}</div>
           <div style="font-size:15px"><b>Viáticos entregados:</b> ${plata(gira.viaticos) || '—'}</div>
         </div>
       </div>
@@ -5152,6 +5170,7 @@ function PlanificacionRRHH({ gira, paradas, alCerrar }) {
             <div class="mini">Semana del ${fecha(gira.fecha_desde, 1)}${gira.fecha_hasta ? ' al ' + fecha(gira.fecha_hasta, 1) : ''}</div>
           </div>
           <div class="mini der">
+            <div><b>Vehículo:</b> ${gira.vehiculo || '—'}</div>
             <div style="font-size:15px"><b>Viáticos entregados:</b> ${plata(gira.viaticos) || '—'}</div>
           </div>
         </div>
@@ -7419,6 +7438,130 @@ function Medidor({ rot, parte, total, tono = 1, detalle }) {
 }
 
 
+/* ===== 69_ofertar.js ===== */
+/* =====================================================================
+   ELEVADORES A OFERTAR
+   Equipos con más de 11 meses sin un Service o Service Proactivo
+   CUMPLIDO -- los otros tipos de pedido (garantía, instalación,
+   repuestos, relevamiento, etc.) no cuentan como "asistencia" para esto:
+   lo que importa es hace cuánto que no se le ofrece o realiza un
+   mantenimiento. Organizado por provincia, para saber a quién conviene
+   ofrecerle uno.
+   Sólo lo ven Augusto y Mateo (puedeOfertar(): admin y carga).
+   ===================================================================== */
+const MESES_SIN_ASISTENCIA = 11;
+/* Únicos tipos de pedido que cuentan como "asistencia" para este módulo
+   (valores de la tabla catalogos, tipo 'tipo_pedido'; ver sql/02_datos_base.sql) */
+const TIPOS_ASISTENCIA = ['Service', 'Service Proactivo'];
+
+function ElevadoresAOfertar() {
+  const s = useS();
+  const [busca, setBusca] = useState('');
+
+  /* Última fecha de un Service o Service Proactivo CUMPLIDO por equipo:
+     un solo pase por todos los trabajos, se queda con la más reciente de
+     cada equipo. */
+  const ultimaPorEquipo = useMemo(() => {
+    const m = new Map();
+    s.trabajos.forEach(t => {
+      if (t.estado !== 'CUMPLIDO' || !t.equipo_id || !t.fecha_visita) return;
+      if (!TIPOS_ASISTENCIA.includes(t.tipo_pedido)) return;
+      const actual = m.get(t.equipo_id);
+      if (!actual || t.fecha_visita > actual) m.set(t.equipo_id, t.fecha_visita);
+    });
+    return m;
+  }, [s.trabajos]);
+
+  const candidatos = useMemo(() => {
+    const f = sinAcentos(busca);
+    return s.equipos.map(eq => {
+      const cli = s.clientes.find(c => c.id === eq.cliente_id);
+      const ultima = ultimaPorEquipo.get(eq.id) || null;
+      // Si nunca tuvo un Service ni un Service Proactivo cumplido, se cuenta desde que se instaló
+      const referencia = ultima || eq.fecha_instalacion || null;
+      const meses = referencia ? mesesDesde(referencia) : null;
+      return {
+        eq, cli, ultima, meses,
+        ciudad: eq.ciudad || (cli && cli.ciudad) || '',
+        provincia: eq.provincia || (cli && cli.provincia) || '',
+        direccion: eq.direccion || (cli && cli.direccion) || '',
+        telefono: (cli && cli.telefono) || '',
+      };
+    })
+      .filter(x => x.meses !== null && x.meses > MESES_SIN_ASISTENCIA)
+      .filter(x => !f || sinAcentos([x.eq.n_serie, x.eq.modelo, x.cli && x.cli.nombre,
+        x.ciudad, x.provincia].filter(Boolean).join(' ')).includes(f))
+      .sort((a, b) => b.meses - a.meses || String(a.eq.n_serie || '').localeCompare(String(b.eq.n_serie || '')));
+  }, [s.equipos, s.clientes, ultimaPorEquipo, busca]);
+
+  const porProvincia = useMemo(() => {
+    const m = new Map();
+    candidatos.forEach(x => {
+      const k = x.provincia || 'Sin provincia';
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(x);
+    });
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'es'));
+  }, [candidatos]);
+
+  return html`<div>
+    <div class="panel" style="margin-bottom:10px">
+      <div class="panel-cab">
+        <h2>Elevadores a ofertar</h2>
+        <div class="buscador crece" style="max-width:380px">
+          <input placeholder="Buscar por cliente, N° de serie, ciudad…"
+            value=${busca} onInput=${e => setBusca(e.target.value)} />
+        </div>
+      </div>
+      <div class="panel-cuerpo" style="padding:8px 12px">
+        <div class="mini" style="margin-bottom:8px">Equipos con más de ${MESES_SIN_ASISTENCIA} meses sin un
+          Service o Service Proactivo cumplido: candidatos para ofrecerles un service de mantenimiento.</div>
+        <${Resumen} items=${[
+          ['equipos', candidatos.length],
+          ['provincias', porProvincia.length],
+        ]} />
+      </div>
+    </div>
+
+    ${!candidatos.length && html`<div class="panel"><div class="panel-cuerpo vacio">
+      No hay equipos con más de ${MESES_SIN_ASISTENCIA} meses sin asistencia${busca ? ' que coincidan con la búsqueda' : ''}.
+    </div></div>`}
+
+    ${porProvincia.map(([prov, lista]) => html`<${TablaOfertar} key=${prov} prov=${prov} lista=${lista} />`)}
+  </div>`;
+}
+
+/** Una tabla por provincia, cada una con su propio ref para el Deslizador:
+    van varias juntas en pantalla, así que no pueden compartir uno solo. */
+function TablaOfertar({ prov, lista }) {
+  const caja = useRef(null);
+  return html`<div style="margin-bottom:14px">
+    <div class="titulo-dia">${prov} <span class="mini" style="text-transform:none;font-weight:400">
+      — ${lista.length} equipo${lista.length > 1 ? 's' : ''}</span></div>
+    <div class="tabla-caja panel" ref=${caja}>
+      <table class="grilla">
+        <thead><tr>
+          <th class="congelada">N° Serie</th><th>Modelo</th><th style="min-width:200px">Cliente</th>
+          <th>Ciudad</th><th style="min-width:170px">Dirección</th><th>Teléfono</th>
+          <th>Última asistencia</th><th class="der">Meses sin asistencia</th>
+        </tr></thead>
+        <tbody>
+          ${lista.map(x => html`<tr key=${x.eq.id}>
+            <td class="congelada"><b>${x.eq.n_serie}</b></td>
+            <td>${x.eq.modelo || ''}</td>
+            <td>${x.cli ? x.cli.nombre : ''}</td>
+            <td>${x.ciudad}</td>
+            <td title=${x.direccion}>${x.direccion}</td>
+            <td>${x.telefono}</td>
+            <td>${x.ultima ? fecha(x.ultima, 1) : 'Nunca'}</td>
+            <td class="num">${x.meses}</td>
+          </tr>`)}
+        </tbody>
+      </table>
+      <${Deslizador} para=${caja} />
+    </div>
+  </div>`;
+}
 /* ===== 70_tablero.js ===== */
 /* =====================================================================
    MÓDULO 7 — TABLERO DE GERENCIA
@@ -8828,6 +8971,7 @@ const VISTAS = [
   ['cobranza',  'Cobranza',             () => html`<${Cobranza} />`,  ['admin', 'oficina', 'cobranza', 'carga', 'lectura']],
   ['encuestas', 'Encuestas',            () => html`<${Encuestas} />`, ['admin', 'oficina', 'carga', 'lectura']],
   ['productividad', 'Productividad',    () => html`<${Productividad} />`, ['admin']],
+  ['ofertar',   'Elevadores a ofertar', () => html`<${ElevadoresAOfertar} />`, ['admin', 'carga']],
   ['tablero',   'Tablero',              () => html`<${Tablero} />`,   ['admin', 'carga']],
   ['clientes',  'Clientes y equipos',   () => html`<${Cartera} />`,   TODOS],
   ['admin',     'Administración',       () => html`<${Admin} />`,     ['admin', 'oficina']],
