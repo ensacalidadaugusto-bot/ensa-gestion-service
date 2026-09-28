@@ -5099,10 +5099,12 @@ function HojaRuta({ gira, paradas, alCerrar }) {
 /* ---------- Planificación RRHH: planilla imprimible, no Excel -----------
    Mismo mecanismo que la Planilla de trabajos (HojaRuta) de arriba, pero
    con sólo las columnas que hacen falta para organizar quién va a cada
-   trabajo de la gira: desde N° Serie hasta Fecha Pedido (el mismo bloque
-   "qué hay que hacer y dónde" de COLS_HOJA) más el técnico asignado.
-   Nada de precios, facturación ni cobro: esto es planificación, no plata.
-   Sólo la ven Augusto y Mateo (puedePlanificacionRRHH()). ------------- */
+   trabajo de la gira: desde N° Serie hasta la fecha de realización
+   programada (el mismo bloque "qué hay que hacer y dónde" de COLS_HOJA,
+   pero con la fecha en que se va a hacer -- fecha_visita, la misma que
+   arma la gira -- en lugar de la fecha del pedido) más el técnico
+   asignado. Nada de precios, facturación ni cobro: esto es planificación,
+   no plata. Sólo la ven Augusto y Mateo (puedePlanificacionRRHH()). --- */
 const COLS_RRHH_HOJA = [
   ['N° Serie',      t => t.n_serie,               58,  0, 'corta'],
   ['Modelo',        t => t.modelo,                55,  0, 'corta'],
@@ -5114,7 +5116,7 @@ const COLS_RRHH_HOJA = [
   ['Provincia',     t => provinciaDe(t),           90, 0],
   ['Dirección',     t => direccionDe(t),          150, 0],
   ['Teléfono',      t => t.cliente_telefono,      100, 0],
-  ['Fecha Pedido',  t => fecha(t.fecha_pedido),    70,  0, 'corta'],
+  ['Fecha de Realización', t => fecha(t.fecha_visita), 90, 0, 'corta'],
   ['Técnico',       t => t.tecnicos,              110, 0],
 ];
 
