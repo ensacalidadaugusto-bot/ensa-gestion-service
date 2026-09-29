@@ -137,7 +137,23 @@ a{color:var(--acento)}
 .tab{background:transparent;border:0;color:var(--barra-texto);padding:8px 13px;border-radius:6px;cursor:pointer;white-space:nowrap}
 .tab:hover{background:rgba(255,255,255,.12);color:#fff}
 .tab.on{background:var(--papel);color:var(--texto);font-weight:600}
-.barra .der{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:12px}
+.barra .der{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:12px;flex:0 0 auto}
+/* ---- pestañas de módulos: en una pantalla angosta (tablet, celular) no
+   entran todas -- esta caja se desplaza de costado (con el dedo, con el
+   mouse o con las flechas) en lugar de cortarse fuera de la pantalla sin
+   ninguna forma de llegar a ellas. La marca y el menú de usuario quedan
+   siempre fijos a los costados, sólo esto de acá adentro se achica. ---- */
+.barra .tabs-caja{display:flex;gap:6px;overflow-x:auto;overflow-y:hidden;flex:1 1 auto;min-width:0;
+  -webkit-overflow-scrolling:touch;scroll-behavior:smooth;
+  scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.35) transparent}
+.barra .tabs-caja::-webkit-scrollbar{height:5px}
+.barra .tabs-caja::-webkit-scrollbar-track{background:transparent}
+.barra .tabs-caja::-webkit-scrollbar-thumb{background:rgba(255,255,255,.35);border-radius:10px}
+.barra .tabs-caja::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.55)}
+.flecha-tabs{background:transparent;border:0;color:var(--barra-texto);cursor:pointer;
+  padding:0 3px;font-size:19px;line-height:1;flex:0 0 auto;align-self:stretch}
+.flecha-tabs:hover:not(:disabled){color:#fff}
+.flecha-tabs:disabled{opacity:.25;cursor:default}
 .chip-user{background:rgba(255,255,255,.15);padding:5px 10px;border-radius:20px;cursor:pointer}
 /* botón de modo claro / oscuro */
 .btn-tema{background:rgba(255,255,255,.12);border:0;color:var(--barra-texto);cursor:pointer;
@@ -3018,8 +3034,11 @@ function Resumen({ items }) {
    DESPLAZAMIENTO HORIZONTAL
    La planilla tiene más columnas de las que entran en pantalla. Estos
    botones la corren sin tener que usar la barra de abajo ni el mouse.
+   Lo mismo le hace falta a la barra de pestañas de arriba en una pantalla
+   angosta (tablet, celular) -- por eso la lógica de medir y correr vive
+   en un hook aparte, que Deslizador y la barra de pestañas comparten.
    ===================================================================== */
-function Deslizador({ para }) {
+function useDesplazamiento(para) {
   const [estado, setEstado] = useState({ hay: false, ini: true, fin: false });
 
   const medir = useCallback(() => {
@@ -3036,7 +3055,7 @@ function Deslizador({ para }) {
     c.addEventListener('scroll', medir, { passive: true });
     window.addEventListener('resize', medir);
     const obs = new ResizeObserver(medir); obs.observe(c);
-    const t = setTimeout(medir, 400);   // por si la tabla todavía se está dibujando
+    const t = setTimeout(medir, 400);   // por si el contenido todavía se está dibujando
     return () => {
       c.removeEventListener('scroll', medir);
       window.removeEventListener('resize', medir);
@@ -3053,6 +3072,11 @@ function Deslizador({ para }) {
     if (c) c.scrollTo({ left: dir < 0 ? 0 : c.scrollWidth, behavior: 'smooth' });
   };
 
+  return { estado, correr, alBorde };
+}
+
+function Deslizador({ para }) {
+  const { estado, correr, alBorde } = useDesplazamiento(para);
   if (!estado.hay) return null;
   return html`<div class="deslizador no-imprimir">
     <button class="btn sec chico" disabled=${estado.ini} title="Volver al principio"
@@ -9096,6 +9120,18 @@ function App() {
   const s = useS();
   const [menu, setMenu] = useState(false);
   const [cambiarClave, setCambiarClave] = useState(false);
+  /* Barra de pestañas: en una pantalla angosta (tablet, celular) no entran
+     todos los módulos. tabsRef+useDesplazamiento se declaran siempre, antes
+     de los "return" de abajo, para no romper el orden de hooks entre la
+     pantalla de login y la aplicación ya adentro. */
+  const tabsRef = useRef(null);
+  const { estado: estadoTabs, correr: correrTabs } = useDesplazamiento(tabsRef);
+  // si se cambia de pestaña por otro medio (o al entrar), que la activa quede a la vista
+  useEffect(() => {
+    const c = tabsRef.current;
+    const activo = c && c.querySelector('.tab.on');
+    if (activo) activo.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+  }, [s.vista]);
 
   // el aviso de versión nueva también tiene que verse antes de entrar
   if (!cliente() || s.reconfigurar) {
@@ -9115,8 +9151,14 @@ function App() {
         <img src=${LOGO_BLANCO} alt="ENSA" />
         <span>Gestión general<br />de service</span>
       </div>
-      ${visibles.map(([k, rotulo]) => html`<button class=${'tab ' + (vista[0] === k ? 'on' : '')}
-        onClick=${() => set({ vista: k })}>${rotulo}</button>`)}
+      ${estadoTabs.hay && html`<button class="flecha-tabs" disabled=${estadoTabs.ini}
+        title="Módulos anteriores" onClick=${() => correrTabs(-1)}>‹</button>`}
+      <div class="tabs-caja" ref=${tabsRef}>
+        ${visibles.map(([k, rotulo]) => html`<button class=${'tab ' + (vista[0] === k ? 'on' : '')}
+          onClick=${() => set({ vista: k })}>${rotulo}</button>`)}
+      </div>
+      ${estadoTabs.hay && html`<button class="flecha-tabs" disabled=${estadoTabs.fin}
+        title="Módulos siguientes" onClick=${() => correrTabs(1)}>›</button>`}
       <div class="der">
         ${!s.enLinea && html`<span class="et rojo" title="Seguí trabajando: todo se guarda en esta computadora y se sube cuando vuelva internet">
           ● Sin internet</span>`}
