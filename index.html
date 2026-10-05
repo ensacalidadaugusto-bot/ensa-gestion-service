@@ -1616,7 +1616,6 @@ const COLUMNAS_ESPERADAS = [
   ['fecha_solicitud_factura', '11_puesta_al_dia.sql'],
   ['viaticos', '11_puesta_al_dia.sql'],
   ['monto_trabajo', '38_tipo_y_monto_trabajo.sql'],
-  ['tipo_trabajo', '38_tipo_y_monto_trabajo.sql'],
 ];
 async function verificarEsquema() {
   const db = cliente();
@@ -3647,7 +3646,7 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
       const datos = { ...b, ...cobranzaViva(), ...(extra || {}) };
       const campos = ['correlativo','n_llamada','cliente_id','equipo_id','tipo_pedido','tipo_servicio',
         'prioridad','estado','cierre','fecha_pedido','fecha_visita','gira_id','orden_gira',
-        'encuesta','horas_mo','obs_servicio','comentarios','monto_trabajo','tipo_trabajo',
+        'encuesta','horas_mo','obs_servicio','comentarios','monto_trabajo',
         'precio_sin_iva','facturado',
         'factura_solicitada','fecha_solicitud_factura','fecha_factura','tipo_factura','concepto',
         'cobrado','fecha_pago','obs_cobranza','encuesta_enviada','fecha_encuesta'];
@@ -3845,14 +3844,10 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
           <fieldset><legend>Atención</legend>
             <${Txt} rot="Observaciones del servicio" area=${3} valor=${b.obs_servicio}
               alCambiar=${v => c('obs_servicio', v)} disabled=${!edObs} />
-            <div class="rejilla">
-              <${Sel} rot="Tipo de trabajo a realizar" valor=${b.tipo_trabajo} opts=${opciones('tipo_trabajo')}
-                alCambiar=${v => c('tipo_trabajo', v)} disabled=${!edObs} />
-              <${Txt} rot="Monto del trabajo" tipo="number" valor=${b.monto_trabajo}
-                alCambiar=${v => c('monto_trabajo', v)} disabled=${!edObs} />
-            </div>
-            <div class="mini">Tipo y monto se combinan con las observaciones en la hoja de ruta; el
-              usuario de consulta no los ve.</div>
+            <${Txt} rot="Monto del trabajo" tipo="number" valor=${b.monto_trabajo}
+              alCambiar=${v => c('monto_trabajo', v)} disabled=${!edObs} />
+            <div class="mini">El monto se combina con las observaciones en la hoja de ruta; el
+              usuario de consulta no lo ve.</div>
             ${nuevo
               ? html`<details>
                   <summary class="mini" style="cursor:pointer;margin:2px 0 8px">
@@ -4952,14 +4947,15 @@ const COLS_HOJA = [
   ['Fecha Pedido',         t => fecha(t.fecha_pedido),     58,  4.6, 'corta'],
   ['Tipo  Servicio',       t => (t.tipo_servicio || '').toUpperCase(), 78, 5.4],
   ['VISITA',               t => diaSemana(t.fecha_visita), 58,  4.6, 'corta'],
-  /* El tipo y el monto del trabajo (sql/38_tipo_y_monto_trabajo.sql) se
-     combinan acá, en la misma casilla que las observaciones del servicio:
-     es lo que pidió Augusto para que el técnico vea en la hoja de ruta,
-     de un vistazo, qué hay que hacer y cuánto cobrar. El monto se imprime
-     resaltado porque resaltarMontos() ya reconoce "$" seguido de números
-     (ver RE_MONTO) en cualquier texto de esta columna. */
-  ['OBSERVACIONES',        t => [t.tipo_trabajo, plata(t.monto_trabajo), t.obs_servicio]
-                                  .filter(Boolean).join(' — '),
+  /* El monto del trabajo (sql/38_tipo_y_monto_trabajo.sql) se combina acá,
+     en la misma casilla que las observaciones del servicio: es lo que
+     pidió Augusto para que el técnico vea en la hoja de ruta, de un
+     vistazo, qué hay que hacer y cuánto cobrar. El tipo de trabajo no se
+     agrega por separado: ya está cubierto por "Tipo de Pedido", que tiene
+     su propia columna más arriba. El monto se imprime resaltado porque
+     resaltarMontos() ya reconoce "$" seguido de números (ver RE_MONTO) en
+     cualquier texto de esta columna. */
+  ['OBSERVACIONES',        t => [plata(t.monto_trabajo), t.obs_servicio].filter(Boolean).join(' — '),
                            250, 14.6],
 ];
 /* Cliente, Ciudad y Provincia son lo primero que hay que ubicar de un
@@ -8179,7 +8175,7 @@ function BaseDeDatos() {
     return [...instalacionPorCodigo.entries()]
       .filter(([cod]) => cod && !existentes.has(cod))
       .map(([cod, i]) => ({ ...i, cod }))
-      .sort((a, b) => (a.nombre_cliente || '').localeCompare(b.nombre_cliente || '', 'es'));
+      .sort((a, b) => String(b.fecha_instalacion || '').localeCompare(String(a.fecha_instalacion || '')));
   }, [instalacionPorCodigo, s.equipos]);
 
   const nombreCli = id => (s.clientes.find(c => c.id === id) || {}).nombre || '';
@@ -8187,9 +8183,14 @@ function BaseDeDatos() {
     cli.telefono, cli.correo, cli.cuit_dni,
     (equiposDe.get(cli.id) || []).map(e => `${e.n_serie} ${e.modelo}`).join(' ')].join(' ')).includes(f);
 
+  /* Esta pantalla arranca mostrando lo más nuevo primero -- cliente recién
+     cargado, equipo recién instalado -- en vez del orden alfabético que
+     usan los desplegables del resto de la aplicación (por eso el orden se
+     aplica acá nomás, y no en cómo se traen clientes/equipos de la base). */
   const clientes = useMemo(() => {
     const f = sinAcentos(busca);
-    return s.clientes.filter(c => coincide(c, f));
+    return s.clientes.filter(c => coincide(c, f))
+      .sort((a, b) => String(b.creado_en || '').localeCompare(String(a.creado_en || '')));
   }, [s.clientes, busca, equiposDe]);
 
   const equipos = useMemo(() => {
@@ -8198,12 +8199,14 @@ function BaseDeDatos() {
       .map(e => ({ ...e, inst: instalacionPorCodigo.get(normCodigo(e.n_serie)) || null, nuevo: false }))
       .filter(e => !f || sinAcentos([e.n_serie, e.modelo, e.n_paradas, e.motorizacion, nombreCli(e.cliente_id),
         e.ciudad, e.provincia, e.direccion, e.inst && e.inst.color, e.inst && e.inst.vendedor,
-        e.inst && e.inst.instaladores].filter(Boolean).join(' ')).includes(f));
+        e.inst && e.inst.instaladores].filter(Boolean).join(' ')).includes(f))
+      .sort((a, b) => String(b.fecha_instalacion || '').localeCompare(String(a.fecha_instalacion || '')));
   }, [s.equipos, s.clientes, busca, instalacionPorCodigo]);
 
   /* Los códigos del registro que todavía no son un equipo dado de alta se
      muestran como filas aparte, al final de "Por equipo", para poder
-     darlos de alta sin salir de esta pantalla. */
+     darlos de alta sin salir de esta pantalla. También de más reciente a
+     más antiguo, igual que el resto de "Por equipo". */
   const nuevosFiltrados = useMemo(() => {
     const f = sinAcentos(busca);
     return candidatosAlta.filter(c => !f || sinAcentos([c.codigo, c.nombre_cliente, c.telefono, c.modelo,
@@ -8226,12 +8229,29 @@ function BaseDeDatos() {
       hechos ? 'ok' : 'error');
   }
 
-  /** Guarda la dirección de instalación de una fila del registro (lo único
-      editable del lado de instalaciones, aparte del alta de equipos). */
+  /** Guarda la dirección de instalación de un código del registro que
+      todavía no tiene equipo dado de alta (es lo único que se puede
+      cargar de esas filas, aparte del alta). Una vez que el equipo existe,
+      la dirección pasa a vivir en equipos.direccion (guardarDireccionEquipo,
+      más abajo): son el mismo dato, "Dirección" y "Dirección de
+      instalación" eran dos nombres para lo mismo. */
   async function guardarDireccion(inst, valor) {
     const r = await actualizarYComprobar('instalaciones', inst.id, { direccion_instalacion: valor });
     if (!r.ok) return toast(r.msg, 'error');
     set({ instalaciones: S.instalaciones.map(x => x.id === inst.id ? { ...x, direccion_instalacion: valor } : x) });
+  }
+
+  /** Dirección del equipo ya dado de alta: una sola columna, editable
+      acá mismo, que reemplaza a las dos que había antes ("Dirección" y
+      "Dirección de instalación"). Si todavía no se cargó nada en
+      equipos.direccion pero el registro de instalaciones ya tenía algo
+      escrito, se sigue mostrando eso hasta que se edite por primera vez
+      (ver el "valor" que arma la fila, más abajo); apenas se guarda algo
+      acá, queda en equipos.direccion de una vez. */
+  async function guardarDireccionEquipo(e, valor) {
+    const r = await actualizarYComprobar('equipos', e.id, { direccion: valor });
+    if (!r.ok) return toast(r.msg, 'error');
+    set({ equipos: S.equipos.map(x => x.id === e.id ? { ...x, direccion: valor } : x) });
   }
 
   /** Da de alta, de una, todos los equipos nuevos detectados (y el
@@ -8244,7 +8264,10 @@ function BaseDeDatos() {
       const nombre = (cand.nombre_cliente || '').trim();
       const nombreNorm = sinAcentos(nombre);
       let cli = nombreNorm ? clientesPorNombre.get(nombreNorm) : null;
-      const { ciudad, provincia, direccion } = partirUbicacion(cand.ubicacion);
+      const { ciudad, provincia, direccion: direccionUbicacion } = partirUbicacion(cand.ubicacion);
+      // si ya se había cargado a mano, esa es la dirección correcta: vale más que
+      // la que se puede deducir del texto libre "Ubicación" del archivo de origen
+      const direccion = cand.direccion_instalacion || direccionUbicacion;
       if (!cli && nombre) {
         const { data, error } = await cliente().from('clientes').insert({
           nombre, telefono: cand.telefono || null, ciudad, provincia,
@@ -8293,8 +8316,8 @@ function BaseDeDatos() {
     { rot: 'Motorización', val: e => e.motorizacion }, { rot: 'Puerta', val: e => e.puerta },
     { rot: 'Fecha de instalación', val: e => fecha(e.fecha_instalacion, 1) },
     { rot: 'Cliente', val: e => nombreCli(e.cliente_id) }, { rot: 'Ciudad', val: e => e.ciudad },
-    { rot: 'Provincia', val: e => e.provincia }, { rot: 'Dirección', val: e => e.direccion },
-    { rot: 'Dirección de instalación', val: e => e.inst && e.inst.direccion_instalacion },
+    { rot: 'Provincia', val: e => e.provincia },
+    { rot: 'Dirección de instalación', val: e => e.direccion || (e.inst && e.inst.direccion_instalacion) || '' },
     { rot: 'Vendedor', val: e => e.inst && e.inst.vendedor },
     { rot: 'Instaladores', val: e => e.inst && e.inst.instaladores },
     ...(puedeComercial ? [{ rot: 'Atenciones', val: e => (resumenEq.get(e.id) || {}).n || 0 }] : []),
@@ -8385,7 +8408,9 @@ function BaseDeDatos() {
                       <span class="mini"> · modelo ${e.modelo || '—'} · ${e.n_paradas || '—'}</span></td>
                     <td class="mini">${e.motorizacion || ''} ${e.puerta ? '· puerta ' + e.puerta : ''}</td>
                     <td class="mini" colspan="2">${e.fecha_instalacion ? 'instalado ' + fecha(e.fecha_instalacion, 1) : ''}</td>
-                    <td class="mini" colspan="4">${e.direccion || ''}${!puedeComercial && extra ? ' · ' + extra : ''}</td>
+                    <td class="mini" colspan="4">${e.direccion
+                      || (instalacionPorCodigo.get(normCodigo(e.n_serie)) || {}).direccion_instalacion
+                      || ''}${!puedeComercial && extra ? ' · ' + extra : ''}</td>
                     ${puedeComercial && html`<td class="num">${re.n || 0}</td><td>${fecha(re.ultimo)}</td>
                       <td class="mini" colspan="2">${extra}</td>`}
                   </tr>`;
@@ -8405,8 +8430,7 @@ function BaseDeDatos() {
             <th class="congelada">N° Serie</th><th>Mod.</th><th>Par.</th><th>Color</th>
             <th>Motoriz.</th><th>Puerta</th><th>Instalación</th>
             <th style="min-width:200px">Cliente</th><th>Ciudad</th><th>Provincia</th>
-            <th style="min-width:150px">Dirección</th>
-            <th style="min-width:160px">Dirección de instalación</th>
+            <th style="min-width:200px">Dirección de instalación</th>
             <th>Vendedor</th><th style="min-width:140px">Instaladores</th><th>Obs.</th>
             ${puedeComercial && html`<th class="der">Atenc.</th>`}
             <th class="der">Garantías</th><th class="der">Horas</th>
@@ -8425,13 +8449,15 @@ function BaseDeDatos() {
                 <td>${fecha(e.fecha_instalacion)}</td>
                 <td class=${e.cliente_id ? '' : 'mini'}>${nombreCli(e.cliente_id) || 'sin cliente'}</td>
                 <td>${e.ciudad || ''}</td><td>${e.provincia || ''}</td>
-                <td title=${e.direccion}>${e.direccion || ''}</td>
-                <td onClick=${ev => puedeAlta && i && ev.stopPropagation()}>
-                  ${!i ? '' : puedeAlta
-                    ? html`<${CampoGrilla} valor=${i.direccion_instalacion} ancho=${150}
-                        titulo="Dirección de instalación (se carga a mano)" placeholder="Sin cargar…"
-                        onGuardar=${v => guardarDireccion(i, v)} />`
-                    : html`<span title=${i.direccion_instalacion}>${i.direccion_instalacion || ''}</span>`}
+                <td onClick=${ev => puedeAlta && ev.stopPropagation()}>
+                  ${(() => {
+                    const dir = e.direccion || (i && i.direccion_instalacion) || '';
+                    return puedeAlta
+                      ? html`<${CampoGrilla} valor=${dir} ancho=${190}
+                          titulo="Dirección de instalación" placeholder="Sin cargar…"
+                          onGuardar=${v => guardarDireccionEquipo(e, v)} />`
+                      : html`<span title=${dir}>${dir}</span>`;
+                  })()}
                 </td>
                 <td>${(i && i.vendedor) || ''}</td>
                 <td title=${i && i.instaladores}>${(i && i.instaladores) || ''}</td>
@@ -8451,10 +8477,9 @@ function BaseDeDatos() {
               <td>${fecha(c.fecha_instalacion)}</td>
               <td class="mini">${c.nombre_cliente || ''} (sin dar de alta)</td>
               <td colspan="2" title=${c.ubicacion}>${c.ubicacion || ''}</td>
-              <td></td>
               <td onClick=${ev => puedeAlta && ev.stopPropagation()}>
                 ${puedeAlta
-                  ? html`<${CampoGrilla} valor=${c.direccion_instalacion} ancho=${150}
+                  ? html`<${CampoGrilla} valor=${c.direccion_instalacion} ancho=${190}
                       titulo="Dirección de instalación (se carga a mano)" placeholder="Sin cargar…"
                       onGuardar=${v => guardarDireccion(c, v)} />`
                   : html`<span title=${c.direccion_instalacion}>${c.direccion_instalacion || ''}</span>`}
