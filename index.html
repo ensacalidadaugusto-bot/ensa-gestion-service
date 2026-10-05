@@ -3508,15 +3508,34 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
   async function marcarCobro(valor) {
     const campos = { cobrado: valor };
     if (['SI', 'CANCELADO'].includes(valor) && !b2.fecha_pago) campos.fecha_pago = hoyISO();
+    // "No aplica" significa que este trabajo no tiene cobro: si quedó una
+    // fecha de pago cargada de antes, ya no corresponde.
+    if (valor === 'NO APLICA' && b2.fecha_pago) campos.fecha_pago = null;
     let aviso = 'Guardado';
-    if (['SI', 'CANCELADO'].includes(valor) && estaAbierto(b2)) {
+    if (['SI', 'CANCELADO', 'NO APLICA'].includes(valor) && estaAbierto(b2)) {
       const faltaAlCobrar = faltaParaCerrar({ ...b2, ...campos });
       if (faltaAlCobrar.length) {
-        aviso = `Cobro registrado. El trabajo sigue ABIERTO: falta ${faltaAlCobrar.join(' y ')}.`;
+        aviso = (valor === 'NO APLICA' ? 'Guardado' : 'Cobro registrado')
+          + `. El trabajo sigue ABIERTO: falta ${faltaAlCobrar.join(' y ')}.`;
       } else {
         campos.cierre = 'CERRADO';
-        aviso = 'Cobro registrado y trabajo CERRADO';
+        aviso = valor === 'NO APLICA' ? 'Trabajo CERRADO' : 'Cobro registrado y trabajo CERRADO';
       }
+    }
+    await cambiarCobranza(campos, aviso);
+  }
+
+  /* Mismo criterio que marcarCobro(): si al definir la facturación como
+     "No aplica" ya no falta nada más para cerrar, el trabajo se cierra
+     solo ahí mismo. También borra la fecha de factura si había quedado
+     cargada de antes: una facturación que no aplica no tiene fecha. */
+  async function cambiarFacturado(valor) {
+    const campos = { facturado: valor };
+    if (valor === 'NO APLICA' && b2.fecha_factura) campos.fecha_factura = null;
+    let aviso = 'Guardado';
+    if (valor === 'NO APLICA' && estaAbierto(b2)) {
+      const falta = faltaParaCerrar({ ...b2, ...campos });
+      if (!falta.length) { campos.cierre = 'CERRADO'; aviso = 'Trabajo CERRADO'; }
     }
     await cambiarCobranza(campos, aviso);
   }
@@ -3825,17 +3844,19 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
                 val=${b2.precio_sin_iva ? plata((Number(b2.precio_sin_iva) || 0) * (1 + ivaDe(b2) / 100)) : ''} />`}
               ${edCob
                 ? html`<${Campo} rot="Facturado / enviado">
-                    <select value=${b2.facturado || ''} onChange=${e => cambiarCobranza({ facturado: e.target.value })}>
+                    <select value=${b2.facturado || ''} onChange=${e => cambiarFacturado(e.target.value)}>
                       ${opciones('facturado').map(o => html`<option value=${o}>${o}</option>`)}</select>
                   <//>`
                 : html`<${Dato} rot="Facturado / enviado" ancho=${140}
                     val=${b2.facturado ? html`<${Et} txt=${b2.facturado} mapa=${COLOR_COBRO} />` : ''} />`}
-              ${edCob
-                ? html`<${Campo} rot="Fecha de factura">
-                    <input type="date" value=${b2.fecha_factura || ''}
-                      onChange=${e => cambiarCobranza({ fecha_factura: e.target.value || null })} />
-                  <//>`
-                : html`<${Dato} rot="Fecha de factura" val=${fecha(b2.fecha_factura, 1)} ancho=${120} />`}
+              ${b2.facturado === 'NO APLICA'
+                ? html`<${Dato} rot="Fecha de factura" val="No aplica" ancho=${120} />`
+                : (edCob
+                  ? html`<${Campo} rot="Fecha de factura">
+                      <input type="date" value=${b2.fecha_factura || ''}
+                        onChange=${e => cambiarCobranza({ fecha_factura: e.target.value || null })} />
+                    <//>`
+                  : html`<${Dato} rot="Fecha de factura" val=${fecha(b2.fecha_factura, 1)} ancho=${120} />`)}
               ${edCob
                 ? html`<${Campo} rot="Tipo de factura">
                     <select value=${b2.tipo_factura || ''}
@@ -3883,12 +3904,14 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
                   <//>`
                 : html`<${Dato} rot="Cobrado" ancho=${130}
                     val=${b2.cobrado ? html`<${Et} txt=${b2.cobrado} mapa=${COLOR_COBRO} />` : ''} />`}
-              ${edCob
-                ? html`<${Campo} rot="Fecha de pago">
-                    <input type="date" value=${b2.fecha_pago || ''}
-                      onChange=${e => cambiarCobranza({ fecha_pago: e.target.value || null })} />
-                  <//>`
-                : html`<${Dato} rot="Fecha de pago" val=${fecha(b2.fecha_pago, 1)} ancho=${120} />`}
+              ${b2.cobrado === 'NO APLICA'
+                ? html`<${Dato} rot="Fecha de pago" val="No aplica" ancho=${120} />`
+                : (edCob
+                  ? html`<${Campo} rot="Fecha de pago">
+                      <input type="date" value=${b2.fecha_pago || ''}
+                        onChange=${e => cambiarCobranza({ fecha_pago: e.target.value || null })} />
+                    <//>`
+                  : html`<${Dato} rot="Fecha de pago" val=${fecha(b2.fecha_pago, 1)} ancho=${120} />`)}
               <${Dato} rot="Cierre" ancho=${130}
                 val=${b.estado === 'CUMPLIDO' ? html`<${MarcaCierre} t=${b2} />` : '—'} />
             </div>
@@ -5742,15 +5765,35 @@ function Cobranza() {
   async function marcarCobro(t, valor) {
     const campos = { cobrado: valor };
     if (['SI', 'CANCELADO'].includes(valor) && !t.fecha_pago) campos.fecha_pago = hoyISO();
+    // "No aplica" significa que este trabajo no tiene cobro: si quedó una
+    // fecha de pago cargada de antes, ya no corresponde.
+    if (valor === 'NO APLICA' && t.fecha_pago) campos.fecha_pago = null;
     let aviso = 'Guardado';
-    if (['SI', 'CANCELADO'].includes(valor) && estaAbierto(t)) {
+    if (['SI', 'CANCELADO', 'NO APLICA'].includes(valor) && estaAbierto(t)) {
       const falta = faltaParaCerrar({ ...t, ...campos });
       if (falta.length) {
-        aviso = `Cobro registrado. El trabajo sigue ABIERTO: falta ${falta.join(' y ')}.`;
+        aviso = (valor === 'NO APLICA' ? 'Guardado' : 'Cobro registrado')
+          + `. El trabajo sigue ABIERTO: falta ${falta.join(' y ')}.`;
       } else {
         campos.cierre = 'CERRADO';
-        aviso = 'Cobro registrado y trabajo CERRADO';
+        aviso = valor === 'NO APLICA' ? 'Trabajo CERRADO' : 'Cobro registrado y trabajo CERRADO';
       }
+    }
+    await cambiar(t, campos, aviso);
+  }
+
+  /* Mismo criterio que marcarCobro(): si al definir la facturación como
+     "No aplica" ya no falta nada más para cerrar (las observaciones del
+     servicio ya están cargadas), el trabajo se cierra solo ahí mismo, sin
+     un paso aparte. También borra la fecha de factura si había quedado
+     cargada de antes: una facturación que no aplica no tiene fecha. */
+  async function cambiarFacturado(t, valor) {
+    const campos = { facturado: valor };
+    if (valor === 'NO APLICA' && t.fecha_factura) campos.fecha_factura = null;
+    let aviso = 'Guardado';
+    if (valor === 'NO APLICA' && estaAbierto(t)) {
+      const falta = faltaParaCerrar({ ...t, ...campos });
+      if (!falta.length) { campos.cierre = 'CERRADO'; aviso = 'Trabajo CERRADO'; }
     }
     await cambiar(t, campos, aviso);
   }
@@ -5942,13 +5985,14 @@ function Cobranza() {
             </td>
             <td class="no-imprimir">${editable
               ? html`<select style="width:118px" value=${t.facturado || ''}
-                  onChange=${e => cambiar(t, { facturado: e.target.value })}>
+                  onChange=${e => cambiarFacturado(t, e.target.value)}>
                   ${opciones('facturado').map(o => html`<option value=${o}>${o}</option>`)}</select>`
               : html`<${Et} txt=${t.facturado} mapa=${COLOR_COBRO} />`}</td>
-            <td class="no-imprimir">${editable
-              ? html`<input type="date" style="width:130px" value=${t.fecha_factura || ''}
-                  onChange=${e => cambiar(t, { fecha_factura: e.target.value || null })} />`
-              : fecha(t.fecha_factura)}</td>
+            <td class="no-imprimir">${t.facturado === 'NO APLICA' ? html`<span class="mini">No aplica</span>`
+              : (editable
+                ? html`<input type="date" style="width:130px" value=${t.fecha_factura || ''}
+                    onChange=${e => cambiar(t, { fecha_factura: e.target.value || null })} />`
+                : fecha(t.fecha_factura))}</td>
             <td class="no-imprimir">${editable
               ? html`<select style="width:150px" value=${t.tipo_factura || ''}
                   onChange=${e => cambiar(t, { tipo_factura: e.target.value || null })}>
@@ -5983,10 +6027,11 @@ function Cobranza() {
                   onChange=${e => marcarCobro(t, e.target.value)}>
                   ${opciones('cobrado').map(o => html`<option value=${o}>${o}</option>`)}</select>`
               : html`<${Et} txt=${t.cobrado} mapa=${COLOR_COBRO} />`}</td>
-            <td class="no-imprimir">${editable
-              ? html`<input type="date" style="width:130px" value=${t.fecha_pago || ''}
-                  onChange=${e => cambiar(t, { fecha_pago: e.target.value || null })} />`
-              : fecha(t.fecha_pago)}</td>
+            <td class="no-imprimir">${t.cobrado === 'NO APLICA' ? html`<span class="mini">No aplica</span>`
+              : (editable
+                ? html`<input type="date" style="width:130px" value=${t.fecha_pago || ''}
+                    onChange=${e => cambiar(t, { fecha_pago: e.target.value || null })} />`
+                : fecha(t.fecha_pago))}</td>
           </tr>`)}
         </tbody>
       </table>
