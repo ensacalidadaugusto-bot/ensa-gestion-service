@@ -1725,8 +1725,14 @@ function rol() { return (S.perfil && S.perfil.rol) || 'lectura'; }
 const enRol = (...r) => r.includes(rol());
 
 function esAdmin()       { return enRol('admin'); }
-/** campos de servicio: tipo, estado, fechas, horas y técnicos */
-function puedeServicio() { return enRol('admin', 'oficina', 'carga', 'cobranza'); }
+/** campos de servicio: tipo, estado, fechas, horas y técnicos -- "la
+    planificación del trabajo" que, según el propio cuadro de roles,
+    cobranza no toca: sólo carga precio, facturación, cobro, observaciones
+    y cierre (ver puedeCobranza() y puedeObservar()). Si cobranza entrara
+    acá podría, por ejemplo, cambiar el estado a CUMPLIDO sin haber hecho
+    el service. La base ya lo rechaza (fn_permisos_trabajo), pero no tiene
+    sentido que la pantalla le ofrezca algo que después la base le niega. */
+function puedeServicio() { return enRol('admin', 'oficina', 'carga'); }
 /** precio, facturación, cobro y cierre administrativo */
 function puedeCobranza() { return enRol('admin', 'oficina', 'cobranza'); }
 /** observaciones del servicio y comentarios internos: los cargan ambos perfiles */
