@@ -1725,14 +1725,20 @@ function rol() { return (S.perfil && S.perfil.rol) || 'lectura'; }
 const enRol = (...r) => r.includes(rol());
 
 function esAdmin()       { return enRol('admin'); }
-/** campos de servicio: tipo, estado, fechas, horas y técnicos -- "la
-    planificación del trabajo" que, según el propio cuadro de roles,
-    cobranza no toca: sólo carga precio, facturación, cobro, observaciones
-    y cierre (ver puedeCobranza() y puedeObservar()). Si cobranza entrara
-    acá podría, por ejemplo, cambiar el estado a CUMPLIDO sin haber hecho
-    el service. La base ya lo rechaza (fn_permisos_trabajo), pero no tiene
-    sentido que la pantalla le ofrezca algo que después la base le niega. */
+/** campos de servicio: tipo, fechas, horas y técnicos -- "la planificación
+    del trabajo" que, según el propio cuadro de roles, cobranza no toca:
+    sólo carga precio, facturación, cobro, observaciones, cierre, y (ver
+    puedeEstadoVisita() más abajo) el estado y la fecha de visita. La base
+    ya rechaza el resto (fn_permisos_trabajo), pero no tiene sentido que
+    la pantalla le ofrezca algo que después la base le niega. */
 function puedeServicio() { return enRol('admin', 'oficina', 'carga'); }
+/** estado y fecha de visita: lo mismo que puedeServicio(), pero además
+    cobranza -- necesita poder pasar un trabajo de PROGRAMADO a CUMPLIDO
+    (por ejemplo al facturar y cobrar un service que todavía no se marcó
+    hecho) y corregir la fecha real en que se hizo, sin por eso poder
+    tocar el resto de la planificación (tipo de pedido, tipo de servicio,
+    prioridad, fecha del pedido, horas, encuesta ni técnicos). */
+function puedeEstadoVisita() { return enRol('admin', 'oficina', 'carga', 'cobranza'); }
 /** precio, facturación, cobro y cierre administrativo */
 function puedeCobranza() { return enRol('admin', 'oficina', 'cobranza'); }
 /** observaciones del servicio y comentarios internos: los cargan ambos perfiles */
@@ -3450,6 +3456,7 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
   const [creando, setCreando] = useState(null);   // 'cliente' | 'equipo'
   const editable = puedeEditar();          // puede guardar algo
   const edServ = puedeServicio();          // datos del servicio y planificación
+  const edEstado = puedeEstadoVisita();    // estado y fecha de visita: además cobranza
   const edCob = puedeCobranza();           // precio, facturación, cobro y cierre
   const edObs = puedeObservar();           // observaciones y comentarios
   const cli = s.clientes.find(c => c.id === b.cliente_id);
@@ -3702,9 +3709,9 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
   const restoAtencion = html`<${Fragment}>
     <div class="rejilla">
       <${Sel} rot="Estado" valor=${b.estado} opts=${opciones('estado')}
-        alCambiar=${elegirEstado} disabled=${!edServ} />
+        alCambiar=${elegirEstado} disabled=${!edEstado} />
       <${Txt} rot="Fecha de visita" tipo="date" valor=${b.fecha_visita}
-        alCambiar=${v => c('fecha_visita', v)} disabled=${!edServ} />
+        alCambiar=${v => c('fecha_visita', v)} disabled=${!edEstado} />
       <${HorasMin} rot="Horas de mano de obra" valor=${b.horas_mo}
         alCambiar=${v => c('horas_mo', v)} disabled=${!edServ} />
       <${Sel} rot="Encuesta de satisfacción" valor=${b.encuesta} opts=${opciones('encuesta')}
