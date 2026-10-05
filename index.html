@@ -3539,6 +3539,21 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
     }
     await cambiarCobranza(campos, aviso);
   }
+
+  /* Los botones de cerrar/reabrir tienen que guardar SOLO el campo
+     "cierre" -- igual que cualquier otro campo de esta solapa -- y no
+     pasar por guardar(), que manda la ficha ENTERA (todo lo de la solapa
+     Servicio incluido). Para cobranza eso importaba: el trigger de
+     permisos de la base compara campo por campo contra lo que cada rol
+     puede tocar, y mandar de más -- aunque sea con el mismo valor que ya
+     tenía -- puede marcar como "tocado" algo de la planificación del
+     trabajo y rechazar el guardado con "no puede tocar la planificación",
+     aunque la persona sólo haya apretado "Cerrar trabajo". */
+  async function cerrarComo(valorCierre, aviso) {
+    setGuardando(true);
+    try { await cambiarCobranza({ cierre: valorCierre }, aviso); }
+    finally { setGuardando(false); }
+  }
   // sugerir prioridad según el tipo de servicio
   const elegirServicio = v => {
     const cat = S.catalogos.find(x => x.tipo === 'tipo_servicio' && x.valor === v);
@@ -3758,11 +3773,11 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
                     onClick=${() => { set({ vista: 'cobranza' }); alCerrar(); }}>
                     Completar en Cobranza →</button>`
                 : html`<button class="btn" disabled=${guardando}
-                    onClick=${() => guardar({ cierre: 'CERRADO' })}>
+                    onClick=${() => cerrarComo('CERRADO', falta.length ? 'Cerrado por el administrador sin ' + falta.join(' y ') : 'Trabajo cerrado')}>
                     ${falta.length ? 'Cerrar igual (administrador)' : 'Cerrar trabajo'}</button>`}
               <button class="btn sec" disabled=${guardando}
                 title="Para casos viejos que no se van a cobrar en lo inmediato: lo saca de la cola de pendientes, pero deja registrado que todavía debe"
-                onClick=${() => guardar({ cierre: CIERRE_PENDIENTE_COBRANZA })}>Cerrar (pendiente de cobranza)</button>
+                onClick=${() => cerrarComo(CIERRE_PENDIENTE_COBRANZA, 'Cerrado como pendiente de cobranza')}>Cerrar (pendiente de cobranza)</button>
             </div>`}
           </div>`}
         ${puedeVerPlata() && !nuevo && (b2.cierre === 'CERRADO' || b2.cierre === CIERRE_PENDIENTE_COBRANZA) && html`
@@ -3773,8 +3788,9 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
               : 'Cerrado técnicamente, pero todavía tiene un pago pendiente. El cobro se sigue viendo en Cobranza.'}</span>
             ${edCob && html`<div class="fila" style="margin-left:auto;gap:6px">
               ${b2.cierre === CIERRE_PENDIENTE_COBRANZA && html`<button class="btn chico" disabled=${guardando}
-                onClick=${() => guardar({ cierre: 'CERRADO' })}>Ya pagó: cerrar</button>`}
-              <button class="btn sec chico" onClick=${() => guardar({ cierre: 'ABIERTO' })}>Reabrir</button>
+                onClick=${() => cerrarComo('CERRADO', 'Trabajo cerrado')}>Ya pagó: cerrar</button>`}
+              <button class="btn sec chico" disabled=${guardando}
+                onClick=${() => cerrarComo('ABIERTO', 'Trabajo reabierto')}>Reabrir</button>
             </div>`}
           </div>`}
         ${pestania === 'servicio' && html`<div>
