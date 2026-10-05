@@ -1021,7 +1021,7 @@ function cliente() {
    ===================================================================== */
 const S = {
   usuario: null, perfil: null, cargando: true, error: null,
-  trabajos: [], clientes: [], equipos: [], tecnicos: [], repuestos: [],
+  trabajos: [], clientes: [], equipos: [], tecnicos: [], repuestos: [], instalaciones: [],
   giras: [], catalogos: [], config: { cotizacion_usd: 1500, iva: 21, mes_cotizacion: '' },
   vista: 'trabajos', toasts: [],
   enLinea: true, pendientes: 0, subiendo: false, errorGrave: null, faltanColumnas: null,
@@ -1637,6 +1637,7 @@ async function cargarDatos() {
   const db = cliente();
   set({ cargando: true, error: null });
   if (esConsulta()) return cargarDatosConsulta();
+  if (esPublico()) return cargarDatosPublico();
   // sin conexión no tiene sentido esperar a que fallen las consultas: se usa la copia local
   if (!navigator.onLine) {
     const c = await leerCache();
@@ -1647,7 +1648,7 @@ async function cargarDatos() {
     }
   }
   try {
-    const [trabajos, clientes, equipos, tecnicos, repuestos, giras, catalogos, cfg] = await Promise.all([
+    const [trabajos, clientes, equipos, tecnicos, repuestos, giras, catalogos, instalaciones, cfg] = await Promise.all([
       traerTodo('v_trabajos', { campo: 'id', asc: false }),
       traerTodo('clientes', { campo: 'nombre', asc: true }),
       traerTodo('equipos', { campo: 'n_serie', asc: true }),
@@ -1655,9 +1656,10 @@ async function cargarDatos() {
       traerTodo('repuestos', { campo: 'orden', asc: true }),
       traerTodo('giras', { campo: 'fecha_desde', asc: false }),
       traerTodo('catalogos', { campo: 'orden', asc: true }),
+      traerTodo('instalaciones', { campo: 'id', asc: true }),
       db.from('config').select('*').eq('id', 1).maybeSingle(),
     ]);
-    const datos = { trabajos, clientes, equipos, tecnicos, repuestos, giras, catalogos,
+    const datos = { trabajos, clientes, equipos, tecnicos, repuestos, giras, catalogos, instalaciones,
       config: cfg.data || S.config };
     set({ ...datos, cargando: false, desdeCache: null });
     guardarCache(datos);                       // copia local por si se corta internet
@@ -1678,13 +1680,28 @@ async function cargarDatos() {
    precios, facturación, cobro ni cierre, aunque los pida. */
 async function cargarDatosConsulta() {
   try {
-    const [trabajos, tecnicos, catalogos] = await Promise.all([
+    const [trabajos, tecnicos, catalogos, instalaciones] = await Promise.all([
       traerTodo('v_trabajos_consulta', { campo: 'id', asc: false }),
       traerTodo('tecnicos', { campo: 'nombre', asc: true }),
       traerTodo('catalogos', { campo: 'orden', asc: true }),
+      traerTodo('instalaciones', { campo: 'id', asc: true }),
     ]);
-    set({ trabajos, tecnicos, catalogos, clientes: [], equipos: [], repuestos: [], giras: [],
+    set({ trabajos, tecnicos, catalogos, instalaciones, clientes: [], equipos: [], repuestos: [], giras: [],
       cargando: false, desdeCache: null });
+  } catch (e) {
+    set({ cargando: false, error: e.message || String(e) });
+  }
+}
+
+/* El usuario público (el botón "Ver instalaciones sin usuario" del login)
+   sólo lee la tabla instalaciones: ni siquiera pide el Registro de Service,
+   así que la pantalla no tiene con qué calcular "última asistencia" ni "en
+   el sistema" -- las oculta sola cuando no hay trabajos/equipos cargados. */
+async function cargarDatosPublico() {
+  try {
+    const instalaciones = await traerTodo('instalaciones', { campo: 'id', asc: true });
+    set({ instalaciones, trabajos: [], clientes: [], equipos: [], tecnicos: [], repuestos: [], giras: [],
+      catalogos: [], cargando: false, desdeCache: null });
   } catch (e) {
     set({ cargando: false, error: e.message || String(e) });
   }
@@ -1705,7 +1722,7 @@ function detalleCat(tipo, valor) {
      cobranza  — administración: precios, facturación, cobro y cierre
      lectura   — sólo consulta
    --------------------------------------------------------------------- */
-const ROLES = ['admin', 'oficina', 'carga', 'cobranza', 'lectura', 'consulta'];
+const ROLES = ['admin', 'oficina', 'carga', 'cobranza', 'lectura', 'consulta', 'publico'];
 /* Qué hace cada rol, en criollo (se muestra al asignar un usuario) */
 const DETALLE_ROL = {
   admin: 'Todo, incluidos usuarios, listas, precios y el borrado de registros.',
@@ -1714,13 +1731,17 @@ const DETALLE_ROL = {
   cobranza: 'Precios, facturación, cobro y cierre. No cambia la planificación del trabajo.',
   lectura: 'Visualizador general: ve todos los módulos y no puede modificar nada.',
   consulta: 'Sólo el registro de service —equipo, cliente, observaciones y comentarios— sin ningún dato de dinero. Entra con su correo y contraseña, como todos.',
+  publico: 'El "usuario libre" del Registro de instalaciones: sólo esa pantalla, sin la última asistencia ni si el equipo ya está en el sistema. Se entra sin usuario, desde un botón en el login.',
 };
 const NOMBRE_ROL = {
   admin: 'Administrador', oficina: 'Oficina', carga: 'Carga y giras',
-  cobranza: 'Cobranzas', lectura: 'Visualizador general', consulta: 'Consulta',
+  cobranza: 'Cobranzas', lectura: 'Visualizador general', consulta: 'Consulta', publico: 'Acceso público',
 };
 /** El usuario libre: no ve nada de dinero ni de planificación */
 function esConsulta() { return rol() === 'consulta'; }
+/** El usuario libre del Registro de instalaciones: ni siquiera eso -- sólo
+    esa pantalla, y recortada (sin cruzar con el Registro de Service). */
+function esPublico() { return rol() === 'publico'; }
 function rol() { return (S.perfil && S.perfil.rol) || 'lectura'; }
 const enRol = (...r) => r.includes(rol());
 
@@ -7998,6 +8019,331 @@ function Tablero() {
 }
 
 
+/* ===== 71_instalaciones.js ===== */
+/* =====================================================================
+   REGISTRO DE INSTALACIONES
+   Historial de instalaciones (y reinstalaciones) de equipos, tal cual
+   viene del archivo que usa Supply Chain. Para cada equipo del registro
+   se calcula la fecha de la última asistencia (cualquier trabajo
+   CUMPLIDO que coincida por número de serie, sin importar el tipo de
+   pedido -- a propósito distinto del criterio de "Elevadores a ofertar",
+   que sólo cuenta Service y Service Proactivo: ver app/69_ofertar.js) y
+   se detectan los equipos que todavía no están dados de alta en el
+   sistema, para cargarlos de un botón junto con su cliente.
+   La pantalla la ve cualquier rol, incluido consulta; dar de alta un
+   equipo nuevo y cargar la dirección de instalación es sólo de admin,
+   oficina y carga (puedeCrear(), que es puede_operar() del lado de la
+   base). El usuario de consulta no tiene acceso a las tablas de clientes
+   y equipos (sql/12_usuario_consulta.sql), así que para ese rol no se
+   calcula "equipo nuevo" ni "en el sistema" -- se ocultan en vez de
+   mostrar un dato que no se puede saber con lo que ese rol tiene cargado.
+   ===================================================================== */
+
+/* "Rafaela, Santa fe." -> {ciudad:'Rafaela', provincia:'SANTA FE'}. La
+   columna Ubicación es texto libre (ciudad y provincia separadas por una
+   coma, en el mejor caso), con bastantes variantes: abreviaturas ("Bs.
+   As."), erratas ("Bueno Aires"), direcciones de otro país (Uruguay,
+   Paraguay, Chile) o sin ninguna coma. Cuando la provincia no se
+   reconoce con certeza no se inventa nada: ciudad y provincia quedan
+   vacías y el texto completo pasa a dirección, para no perder el dato
+   ni cargar algo que puede estar mal -- en línea con "crearlo igual, con
+   lo que haya" pero sin forzar una ciudad o provincia que no es segura. */
+const PROVINCIA_UBICACION = {
+  'BUENOS AIRES': 'BUENOS AIRES', 'BS. AS': 'BUENOS AIRES', 'BUENO AIRES': 'BUENOS AIRES',
+  CABA: 'CABA', 'SANTA FE': 'SANTA FE', 'ENTRE RIOS': 'ENTRE RÍOS', CORDOBA: 'CÓRDOBA',
+  NEUQUEN: 'NEUQUÉN', CHUBUT: 'CHUBUT', SALTA: 'SALTA', CORRIENTES: 'CORRIENTES',
+  'SAN LUIS': 'SAN LUIS', MENDOZA: 'MENDOZA', 'RIO NEGRO': 'RÍO NEGRO', TUCUMAN: 'TUCUMÁN',
+  'SANTIAGO DEL ESTERO': 'SANTIAGO DEL ESTERO', JUJUY: 'JUJUY', 'SANTA CRUZ': 'SANTA CRUZ',
+  'TIERRA DEL FUEGO': 'TIERRA DEL FUEGO', CHACO: 'CHACO', 'LA PAMPA': 'LA PAMPA',
+  MISIONES: 'MISIONES', 'SAN JUAN': 'SAN JUAN', 'LA RIOJA': 'LA RIOJA', CATAMARCA: 'CATAMARCA',
+  FORMOSA: 'FORMOSA',
+};
+function partirUbicacion(ubicacion) {
+  const u = (ubicacion || '').trim();
+  if (!u) return { ciudad: null, provincia: null, direccion: null };
+  const limpiar = t => sinAcentos(t.trim().replace(/\.+$/, '')).toUpperCase();
+  const i = u.lastIndexOf(',');
+  if (i >= 0) {
+    const ciudad = u.slice(0, i).trim();
+    const provincia = PROVINCIA_UBICACION[limpiar(u.slice(i + 1))];
+    if (provincia && ciudad) return { ciudad, provincia, direccion: null };
+  } else {
+    const provincia = PROVINCIA_UBICACION[limpiar(u)];
+    if (provincia) return { ciudad: provincia === 'CABA' ? 'CABA' : null, provincia, direccion: null };
+  }
+  return { ciudad: null, provincia: null, direccion: u };
+}
+/** Código tal como viene del registro; "-" es un valor sin sentido (una
+    sola fila lo tiene) y no cuenta como código real de ningún equipo. */
+function codigoValido(c) {
+  const t = (c || '').trim();
+  return t.length >= 2 && t !== '-' ? t : null;
+}
+const normCodigo = c => sinAcentos(codigoValido(c) || '').toUpperCase();
+
+function Instalaciones() {
+  const s = useS();
+  const caja = useRef(null);
+  const [busca, setBusca] = useState('');
+  const [soloNuevos, setSoloNuevos] = useState(false);
+  const [orden, setOrden] = useState({ campo: 'fecha_instalacion', asc: false });
+  const [verEquipo, setVerEquipo] = useState(null);
+  const [fichaId, setFichaId] = useState(null);
+  const [verObs, setVerObs] = useState(null);
+  const [confirmando, setConfirmando] = useState(false);
+  const [procesando, setProcesando] = useState(false);
+  const puedeAlta = puedeCrear();
+  /* consulta y publico no traen clientes ni equipos: para esos roles no
+     se puede saber si un equipo "ya está en el sistema". */
+  const sabeQueEsNuevo = !enRol('consulta', 'publico');
+  /* publico, además, no trae el Registro de Service (a propósito: es el
+     acceso sin usuario, y ese registro tiene datos que no son para
+     compartir así nomás) -- tampoco puede mostrar "última asistencia". */
+  const veUltimaAsistencia = !enRol('publico');
+
+  /* Última fecha de CUALQUIER trabajo CUMPLIDO por número de serie --
+     a diferencia de ultimaPorEquipo en app/69_ofertar.js, que sólo cuenta
+     Service y Service Proactivo: acá cuenta cualquier tipo de pedido. */
+  const ultimaPorCodigo = useMemo(() => {
+    const m = new Map();
+    s.trabajos.forEach(t => {
+      if (t.estado !== 'CUMPLIDO' || !t.n_serie || !t.fecha_visita) return;
+      const k = sinAcentos(t.n_serie.trim()).toUpperCase();
+      const actual = m.get(k);
+      if (!actual || t.fecha_visita > actual) m.set(k, t.fecha_visita);
+    });
+    return m;
+  }, [s.trabajos]);
+
+  const equipoPorCodigo = useMemo(() => {
+    const m = new Map();
+    s.equipos.forEach(e => m.set(sinAcentos((e.n_serie || '').trim()).toUpperCase(), e));
+    return m;
+  }, [s.equipos]);
+
+  const filas = useMemo(() => s.instalaciones.map(i => {
+    const cod = normCodigo(i.codigo);
+    const eq = cod ? equipoPorCodigo.get(cod) : null;
+    return {
+      ...i,
+      cod,
+      eq,
+      nuevo: sabeQueEsNuevo && !!cod && !eq,
+      ultima: (cod && ultimaPorCodigo.get(cod)) || null,
+    };
+  }), [s.instalaciones, equipoPorCodigo, ultimaPorCodigo, sabeQueEsNuevo]);
+
+  /* Un mismo código puede aparecer más de una vez (reinstalación): para
+     dar de alta se usa un solo equipo por código, el de la instalación
+     más reciente. */
+  const candidatosAlta = useMemo(() => {
+    const m = new Map();
+    filas.forEach(f => {
+      if (!f.nuevo) return;
+      const actual = m.get(f.cod);
+      if (!actual || (f.fecha_instalacion || '') >= (actual.fecha_instalacion || '')) m.set(f.cod, f);
+    });
+    return [...m.values()].sort((a, b) => (a.nombre_cliente || '').localeCompare(b.nombre_cliente || '', 'es'));
+  }, [filas]);
+
+  const filtradas = useMemo(() => {
+    const f = sinAcentos(busca);
+    return filas
+      .filter(x => !soloNuevos || x.nuevo)
+      .filter(x => !f || sinAcentos([x.codigo, x.nombre_cliente, x.telefono, x.modelo, x.vendedor,
+        x.instaladores, x.ubicacion, x.direccion_instalacion].filter(Boolean).join(' ')).includes(f));
+  }, [filas, busca, soloNuevos]);
+
+  const ordenadas = useMemo(() => ordenar(filtradas, orden), [filtradas, orden]);
+
+  async function darDeAltaTodos() {
+    setProcesando(true);
+    const clientesNuevos = []; const equiposNuevos = []; const errores = [];
+    const clientesPorNombre = new Map(S.clientes.map(c => [sinAcentos(c.nombre).trim(), c]));
+    for (const cand of candidatosAlta) {
+      const nombre = (cand.nombre_cliente || '').trim();
+      const nombreNorm = sinAcentos(nombre);
+      let cli = nombreNorm ? clientesPorNombre.get(nombreNorm) : null;
+      const { ciudad, provincia, direccion } = partirUbicacion(cand.ubicacion);
+      if (!cli && nombre) {
+        const { data, error } = await cliente().from('clientes').insert({
+          nombre, telefono: cand.telefono || null, ciudad, provincia,
+        }).select('*').single();
+        if (error) {
+          errores.push(`Cliente "${nombre}" (equipo ${cand.codigo}): ${error.message}`);
+        } else {
+          cli = data; clientesPorNombre.set(nombreNorm, data); clientesNuevos.push(data);
+        }
+      }
+      const { data: eqData, error: eqError } = await cliente().from('equipos').insert({
+        n_serie: cand.codigo.trim(), modelo: cand.modelo || null, n_paradas: cand.niveles || null,
+        motorizacion: cand.motorizacion || null, fecha_instalacion: cand.fecha_instalacion || null,
+        cliente_id: cli ? cli.id : null, ciudad, provincia, direccion,
+      }).select('*').single();
+      if (eqError) errores.push(`Equipo ${cand.codigo}: ${eqError.message}`);
+      else equiposNuevos.push(eqData);
+    }
+    if (clientesNuevos.length) set({ clientes: [...S.clientes, ...clientesNuevos]
+      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')) });
+    if (equiposNuevos.length) set({ equipos: [...S.equipos, ...equiposNuevos]
+      .sort((a, b) => String(a.n_serie).localeCompare(String(b.n_serie), 'es')) });
+    setProcesando(false);
+    setConfirmando(false);
+    if (errores.length) {
+      console.error('Errores al dar de alta instalaciones:', errores);
+      toast(`${equiposNuevos.length} equipos dados de alta, pero hubo ${errores.length} error`
+        + `${errores.length > 1 ? 'es' : ''}. Revisá la consola.`, 'error');
+    } else {
+      toast(`${equiposNuevos.length} equipos y ${clientesNuevos.length} clientes nuevos dados de alta`, 'ok');
+    }
+  }
+
+  /** Guarda la dirección de instalación (lo único editable acá además del
+      alta de equipos): un campo de texto libre que Augusto va completando
+      de a poco, aparte de "Ubicación" (que es el texto tal cual vino del
+      archivo original y no se toca). */
+  async function guardarDireccion(fila, valor) {
+    const r = await actualizarYComprobar('instalaciones', fila.id, { direccion_instalacion: valor });
+    if (!r.ok) return toast(r.msg, 'error');
+    set({ instalaciones: S.instalaciones.map(x => x.id === fila.id ? { ...x, direccion_instalacion: valor } : x) });
+  }
+
+  const cols = [
+    { rot: 'Código', val: x => x.codigo }, { rot: 'Cliente', val: x => x.nombre_cliente },
+    { rot: 'Teléfono', val: x => x.telefono }, { rot: 'Modelo', val: x => x.modelo },
+    { rot: 'Niveles', val: x => x.niveles }, { rot: 'Color', val: x => x.color },
+    { rot: 'Motorización', val: x => x.motorizacion }, { rot: 'Vendedor', val: x => x.vendedor },
+    { rot: 'Instaladores', val: x => x.instaladores },
+    { rot: 'Fecha de instalación', val: x => fecha(x.fecha_instalacion, 1) },
+    { rot: 'Ubicación', val: x => x.ubicacion },
+    { rot: 'Dirección de instalación', val: x => x.direccion_instalacion },
+    { rot: 'Obs. instalaciones', val: x => x.obs_instalaciones },
+    { rot: 'Obs. comercial', val: x => x.obs_comercial },
+    { rot: 'Obs. producción', val: x => x.obs_produccion },
+    ...(veUltimaAsistencia ? [{ rot: 'Última asistencia', val: x => fecha(x.ultima, 1) }] : []),
+    ...(sabeQueEsNuevo ? [{ rot: 'En el sistema', val: x => x.nuevo ? 'No' : 'Sí' }] : []),
+  ];
+
+  return html`<div>
+    <div class="panel" style="margin-bottom:10px">
+      <div class="panel-cab">
+        <h2>Registro de instalaciones</h2>
+        <div class="buscador crece" style="max-width:360px">
+          <input placeholder="Buscar por código, cliente, teléfono, ubicación…"
+            value=${busca} onInput=${e => setBusca(e.target.value)} />
+        </div>
+        ${sabeQueEsNuevo && html`<button class=${'btn chico ' + (soloNuevos ? '' : 'sec')}
+          onClick=${() => setSoloNuevos(x => !x)}>
+          Sólo equipos nuevos${candidatosAlta.length ? ` (${candidatosAlta.length})` : ''}</button>`}
+        <div style="margin-left:auto" class="fila">
+          <button class="btn sec chico" onClick=${() => bajarCSV('instalaciones', cols, ordenadas)}>Exportar</button>
+          ${puedeAlta && sabeQueEsNuevo && html`<button class="btn chico" disabled=${!candidatosAlta.length}
+            title=${candidatosAlta.length ? '' : 'No hay equipos nuevos para dar de alta'}
+            onClick=${() => setConfirmando(true)}>
+            Dar de alta equipos nuevos${candidatosAlta.length ? ` (${candidatosAlta.length})` : ''}</button>`}
+        </div>
+      </div>
+      <div class="panel-cuerpo" style="padding:8px 12px">
+        ${(veUltimaAsistencia || sabeQueEsNuevo) && html`<div class="mini" style="margin-bottom:8px">
+          ${veUltimaAsistencia ? '"Última asistencia" cuenta cualquier trabajo cumplido de ese equipo, '
+            + 'sin importar el tipo de pedido. ' : ''}
+          ${sabeQueEsNuevo ? 'Los equipos marcados "No" en "En el sistema" todavía no tienen un '
+            + 'equipo (ni, si hace falta, un cliente) dado de alta: el botón de arriba los carga de una.' : ''}
+        </div>`}
+        <${Resumen} items=${[
+          ['instalaciones registradas', s.instalaciones.length],
+          ...(sabeQueEsNuevo ? [['equipos nuevos por dar de alta', candidatosAlta.length]] : []),
+        ]} />
+      </div>
+    </div>
+
+    <div class="tabla-caja panel" ref=${caja}>
+      <table class="grilla">
+        <thead><tr>
+          <${Th} campo="codigo" rot="Código" orden=${orden} setOrden=${setOrden} clase="congelada" />
+          <${Th} campo="nombre_cliente" rot="Cliente" orden=${orden} setOrden=${setOrden} ancho=${200} />
+          <${Th} campo="telefono" rot="Teléfono" orden=${orden} setOrden=${setOrden} />
+          <${Th} campo="modelo" rot="Modelo" orden=${orden} setOrden=${setOrden} />
+          <${Th} campo="niveles" rot="Niveles" orden=${orden} setOrden=${setOrden} />
+          <${Th} campo="color" rot="Color" orden=${orden} setOrden=${setOrden} />
+          <${Th} campo="motorizacion" rot="Motorización" orden=${orden} setOrden=${setOrden} />
+          <${Th} campo="vendedor" rot="Vendedor" orden=${orden} setOrden=${setOrden} />
+          <${Th} campo="instaladores" rot="Instaladores" orden=${orden} setOrden=${setOrden} ancho=${160} />
+          <${Th} campo="fecha_instalacion" rot="Fecha de instalación" orden=${orden} setOrden=${setOrden} />
+          <${Th} campo="ubicacion" rot="Ubicación" orden=${orden} setOrden=${setOrden} ancho=${170} />
+          <${Th} campo="direccion_instalacion" rot="Dirección de instalación" orden=${orden} setOrden=${setOrden} ancho=${180} />
+          <th>Observaciones</th>
+          ${veUltimaAsistencia && html`<${Th} campo="ultima" rot="Última asistencia" orden=${orden} setOrden=${setOrden} />`}
+          ${sabeQueEsNuevo && html`<th>En el sistema</th>`}
+        </tr></thead>
+        <tbody>
+          ${ordenadas.map(x => html`<tr key=${x.id} style=${x.eq ? 'cursor:pointer' : ''}
+              title=${x.eq ? 'Ver la ficha de este equipo' : ''}
+              onClick=${() => x.eq && setVerEquipo(x.eq)}>
+            <td class="congelada"><b>${x.codigo}</b></td>
+            <td>${x.nombre_cliente || ''}</td>
+            <td>${x.telefono || ''}</td>
+            <td>${x.modelo || ''}</td>
+            <td>${x.niveles || ''}</td>
+            <td>${x.color || ''}</td>
+            <td>${x.motorizacion || ''}</td>
+            <td>${x.vendedor || ''}</td>
+            <td title=${x.instaladores}>${x.instaladores || ''}</td>
+            <td>${x.fecha_instalacion ? fecha(x.fecha_instalacion, 1) : '—'}</td>
+            <td title=${x.ubicacion}>${x.ubicacion || ''}</td>
+            <td onClick=${ev => puedeAlta && ev.stopPropagation()}>
+              ${puedeAlta
+                ? html`<${CampoGrilla} valor=${x.direccion_instalacion} ancho=${170}
+                    titulo="Dirección de instalación (se carga a mano)" placeholder="Sin cargar…"
+                    onGuardar=${v => guardarDireccion(x, v)} />`
+                : html`<span title=${x.direccion_instalacion}>${x.direccion_instalacion || ''}</span>`}
+            </td>
+            <td>
+              ${(x.obs_instalaciones || x.obs_comercial || x.obs_produccion)
+                ? html`<button class="btn sec chico" onClick=${ev => { ev.stopPropagation(); setVerObs(x); }}>Ver</button>`
+                : ''}
+            </td>
+            ${veUltimaAsistencia && html`<td>${x.ultima ? fecha(x.ultima, 1) : 'Nunca'}</td>`}
+            ${sabeQueEsNuevo && html`<td>${x.nuevo ? html`<span class="et ambar">Nuevo</span>` : html`<span class="et verde">Sí</span>`}</td>`}
+          </tr>`)}
+        </tbody>
+      </table>
+      ${!ordenadas.length && html`<div class="vacio">Ninguna instalación coincide con la búsqueda.</div>`}
+      <${Deslizador} para=${caja} />
+    </div>
+
+    ${verEquipo && html`<${EditarEquipo} e=${verEquipo} alCerrar=${() => setVerEquipo(null)} alAbrirTrabajo=${setFichaId} />`}
+    ${fichaId && html`<${Ficha} id=${fichaId} alCerrar=${() => setFichaId(null)} />`}
+
+    ${verObs && html`<${Modal} titulo="Observaciones de la instalación" alCerrar=${() => setVerObs(null)}>
+      <div class="mini"><b>${verObs.codigo}</b> — ${verObs.nombre_cliente || ''}</div>
+      ${verObs.obs_instalaciones && html`<p><b>Área Instalaciones:</b><br/>${verObs.obs_instalaciones}</p>`}
+      ${verObs.obs_comercial && html`<p><b>Área Comercial:</b><br/>${verObs.obs_comercial}</p>`}
+      ${verObs.obs_produccion && html`<p><b>Área Producción:</b><br/>${verObs.obs_produccion}</p>`}
+    <//>`}
+
+    ${confirmando && html`<${Modal} titulo="Dar de alta equipos nuevos" alCerrar=${() => !procesando && setConfirmando(false)} ancho=${560}>
+      <p>Se van a crear ${candidatosAlta.length} equipos${' '}
+        (y el cliente, si todavía no existe uno con ese nombre). No se carga ningún trabajo de service.</p>
+      <div class="tabla-caja" style="max-height:260px">
+        <table class="grilla">
+          <thead><tr><th>Código</th><th>Cliente</th><th>Modelo</th><th>Ubicación</th></tr></thead>
+          <tbody>
+            ${candidatosAlta.map(c => html`<tr key=${c.cod}>
+              <td><b>${c.codigo}</b></td><td>${c.nombre_cliente || ''}</td>
+              <td>${c.modelo || ''}</td><td>${c.ubicacion || ''}</td>
+            </tr>`)}
+          </tbody>
+        </table>
+      </div>
+      <div class="fila" style="justify-content:flex-end;margin-top:10px">
+        <button class="btn sec" disabled=${procesando} onClick=${() => setConfirmando(false)}>Cancelar</button>
+        <button class="btn" disabled=${procesando} onClick=${darDeAltaTodos}>
+          ${procesando ? 'Dando de alta…' : `Confirmar y dar de alta ${candidatosAlta.length} equipos`}</button>
+      </div>
+    <//>`}
+  </div>`;
+}
 /* ===== 80_maestros.js ===== */
 /* =====================================================================
    MÓDULO 6 — CARTERA: clientes y sus equipos en una sola pantalla
@@ -9059,11 +9405,33 @@ function PantallaConfig() {
   </div>`;
 }
 
+/* Acceso sin usuario al Registro de instalaciones: la contraseña queda acá
+   a propósito -- no es secreta, es la forma de compartir el enlace con
+   quien sólo necesita ver ese registro (Supply Chain, instaladores, etc.)
+   sin darle un usuario propio ni la aplicación completa (rol "publico",
+   sql/36_rol_publico.sql: sólo lee esa tabla y sólo ve esa pantalla). */
+const ACCESO_PUBLICO = { email: 'instalaciones@ensa.com.ar', password: 'Instalaciones-ENSA-2026' };
+
 function Login() {
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
   const [msg, setMsg] = useState(null);
   const [ocupado, setOcupado] = useState(false);
+  const [entrandoPublico, setEntrandoPublico] = useState(false);
+
+  async function entrarPublico() {
+    setEntrandoPublico(true); setMsg(null);
+    const { error } = await cliente().auth.signInWithPassword(ACCESO_PUBLICO);
+    if (error) {
+      const m = error.message || '';
+      if (/failed to fetch|networkerror|load failed/i.test(m) || !navigator.onLine) {
+        setMsg('No se pudo hablar con el proyecto. Revisá que tengas internet e intentá de nuevo.');
+      } else if (/invalid login credentials/i.test(m)) {
+        setMsg('Este acceso todavía no está creado en Supabase. Avisale al administrador del sistema.');
+      } else setMsg(m);
+    }
+    setEntrandoPublico(false);
+  }
 
   async function entrar(e) {
     e.preventDefault();
@@ -9106,6 +9474,9 @@ function Login() {
     <div class="mini" style="text-align:center;margin-top:10px">
       <a href="#" onClick=${e => { e.preventDefault(); recuperar(); }}>Olvidé mi contraseña</a>
     </div>
+    <button type="button" class="btn sec" style="width:100%;margin-top:14px" disabled=${entrandoPublico}
+      onClick=${entrarPublico}>
+      ${entrandoPublico ? 'Entrando…' : 'Ver instalaciones sin usuario'}</button>
     <div class="mini" style="text-align:center;margin-top:14px;padding-top:12px;
       border-top:1px solid var(--borde);color:var(--suave)">
       Conectado a <b>${(leerConfig().url || '').replace(/^https?:\/\//, '') || 'ningún proyecto'}</b>${' '}
@@ -9129,6 +9500,11 @@ const VISTAS = [
   ['productividad', 'Productividad',    () => html`<${Productividad} />`, ['admin']],
   ['ofertar',   'Elevadores a ofertar', () => html`<${ElevadoresAOfertar} />`, ['admin', 'carga']],
   ['tablero',   'Tablero',              () => html`<${Tablero} />`,   ['admin', 'carga']],
+  /* La ven todos los roles, incluido consulta y el acceso público sin
+     usuario (publico); sólo admin/oficina/carga pueden dar de alta equipos
+     nuevos o cargar la dirección de instalación (puedeCrear()) -- eso lo
+     filtra la propia pantalla, no esta lista. */
+  ['instalaciones', 'Instalaciones',    () => html`<${Instalaciones} />`, [...TODOS, 'consulta', 'publico']],
   ['clientes',  'Clientes y equipos',   () => html`<${Cartera} />`,   TODOS],
   ['admin',     'Administración',       () => html`<${Admin} />`,     ['admin', 'oficina']],
 ];
@@ -9262,8 +9638,8 @@ function App() {
         ${s.instalada && html`<div class="mini" style="margin-top:8px">
           Estás usando la aplicación instalada.</div>`}
         <div class="fila" style="margin-top:8px">
-          <button class="btn sec chico"
-            onClick=${() => { setCambiarClave(true); setMenu(false); }}>Cambiar mi contraseña</button>
+          ${!esPublico() && html`<button class="btn sec chico"
+            onClick=${() => { setCambiarClave(true); setMenu(false); }}>Cambiar mi contraseña</button>`}
           ${puedePrecios() && html`<button class="btn sec chico"
             onClick=${() => { descargarRespaldo(); setMenu(false); }}>Respaldo en Excel</button>`}
           <button class="btn sec chico" onClick=${() => { cargarDatos(); setMenu(false); }}>Recargar datos</button>
