@@ -8104,7 +8104,7 @@ function BaseDeDatos() {
   const s = useS();
   const caja = useRef(null);            // la caja que se desplaza de costado
   const [busca, setBusca] = useState('');
-  const [modo, setModo] = useState('clientes');      // clientes | equipos
+  const [modo, setModo] = useState('equipos');       // clientes | equipos — arranca en equipos (pedido de Augusto)
   const [abierto, setAbierto] = useState({});        // clientes desplegados
   const [soloNuevos, setSoloNuevos] = useState(false);
   const [editCli, setEditCli] = useState(null);
@@ -8461,8 +8461,8 @@ function BaseDeDatos() {
                 </td>
                 <td>${(i && i.vendedor) || ''}</td>
                 <td title=${i && i.instaladores}>${(i && i.instaladores) || ''}</td>
-                <td>${obs ? html`<button class="btn sec chico"
-                  onClick=${ev => { ev.stopPropagation(); setVerObs(i); }}>Ver</button>` : ''}</td>
+                <td>${(i && (puedeAlta || obs)) ? html`<button class="btn sec chico"
+                  onClick=${ev => { ev.stopPropagation(); setVerObs(i); }}>${obs ? 'Ver' : 'Cargar'}</button>` : ''}</td>
                 ${puedeComercial && html`<td class="num">${r.n || 0}</td>`}
                 <td class="num">${r.garantias || 0}</td>
                 <td class="num">${r.horas || ''}</td>
@@ -8486,8 +8486,12 @@ function BaseDeDatos() {
               </td>
               <td>${c.vendedor || ''}</td>
               <td title=${c.instaladores}>${c.instaladores || ''}</td>
-              <td>${(c.obs_instalaciones || c.obs_comercial || c.obs_produccion)
-                ? html`<button class="btn sec chico" onClick=${() => setVerObs(c)}>Ver</button>` : ''}</td>
+              <td>${(() => {
+                const obsC = c.obs_instalaciones || c.obs_comercial || c.obs_produccion;
+                return (puedeAlta || obsC)
+                  ? html`<button class="btn sec chico" onClick=${() => setVerObs(c)}>${obsC ? 'Ver' : 'Cargar'}</button>`
+                  : '';
+              })()}</td>
               ${puedeComercial && html`<td class="num">—</td>`}
               <td class="num">—</td><td class="num">—</td>
               ${puedeComercial && html`<td>—</td>`}
@@ -8505,12 +8509,7 @@ function BaseDeDatos() {
     ${fichaId && html`<${Ficha} id=${fichaId} alCerrar=${() => setFichaId(null)} />`}
     ${verDup && html`<${Duplicados} alCerrar=${() => setVerDup(false)} />`}
 
-    ${verObs && html`<${Modal} titulo="Observaciones de la instalación" alCerrar=${() => setVerObs(null)}>
-      <div class="mini"><b>${verObs.codigo}</b> — ${verObs.nombre_cliente || ''}</div>
-      ${verObs.obs_instalaciones && html`<p><b>Área Instalaciones:</b><br/>${verObs.obs_instalaciones}</p>`}
-      ${verObs.obs_comercial && html`<p><b>Área Comercial:</b><br/>${verObs.obs_comercial}</p>`}
-      ${verObs.obs_produccion && html`<p><b>Área Producción:</b><br/>${verObs.obs_produccion}</p>`}
-    <//>`}
+    ${verObs && html`<${VerObs} inst=${verObs} alCerrar=${() => setVerObs(null)} />`}
 
     ${confirmando && html`<${Modal} titulo="Dar de alta equipos nuevos" alCerrar=${() => !procesando && setConfirmando(false)} ancho=${560}>
       <p>Se van a crear ${nuevosFiltrados.length} equipos${' '}
@@ -8774,6 +8773,44 @@ function EditarEquipo({ e, alCerrar, alAbrirTrabajo }) {
       </div></div>`}
     ${verHistorial && html`<${HistorialImprimible} equipoId=${b.id}
       alCerrar=${() => setVerHistorial(false)} />`}
+    <div class="fila" style="justify-content:flex-end;margin-top:10px">
+      <button class="btn sec" onClick=${alCerrar}>Cerrar</button>
+      ${editable && html`<button class="btn" onClick=${guardar}>Guardar</button>`}
+    </div>
+  <//>`;
+}
+
+/** Observaciones de la instalación (tabla instalaciones: obs_instalaciones,
+    obs_comercial, obs_produccion). Antes era de sólo lectura; ahora se
+    puede cargar o corregir cada una -- a veces ese dato recién se consigue
+    después, al visitar el equipo, no en el momento del alta. "inst" es
+    siempre una fila de instalaciones (viene de e.inst, para un equipo ya
+    dado de alta, o del propio candidato todavía sin alta: ambos son filas
+    de esa tabla y tienen id). Mismo permiso que el resto de lo que se edita
+    en esta pantalla (dirección, color, etc.): puedeCrear(). */
+function VerObs({ inst, alCerrar }) {
+  const [b, setB] = useState({ ...inst });
+  const editable = puedeCrear();
+  const set2 = (k, v) => setB(x => ({ ...x, [k]: v }));
+
+  async function guardar() {
+    const cuerpo = { obs_instalaciones: b.obs_instalaciones, obs_comercial: b.obs_comercial,
+      obs_produccion: b.obs_produccion };
+    const r = await actualizarYComprobar('instalaciones', inst.id, cuerpo);
+    if (!r.ok) return toast(r.msg, 'error');
+    set({ instalaciones: S.instalaciones.map(x => x.id === inst.id ? { ...x, ...cuerpo } : x) });
+    toast('Observaciones guardadas', 'ok');
+    alCerrar();
+  }
+
+  return html`<${Modal} titulo="Observaciones de la instalación" alCerrar=${alCerrar} ancho=${560}>
+    <div class="mini" style="margin-bottom:8px"><b>${inst.codigo}</b> — ${inst.nombre_cliente || ''}</div>
+    <${Txt} rot="Área Instalaciones" area=${3} valor=${b.obs_instalaciones} placeholder="Sin cargar…"
+      disabled=${!editable} alCambiar=${v => set2('obs_instalaciones', v)} />
+    <${Txt} rot="Área Comercial" area=${3} valor=${b.obs_comercial} placeholder="Sin cargar…"
+      disabled=${!editable} alCambiar=${v => set2('obs_comercial', v)} />
+    <${Txt} rot="Área Producción" area=${3} valor=${b.obs_produccion} placeholder="Sin cargar…"
+      disabled=${!editable} alCambiar=${v => set2('obs_produccion', v)} />
     <div class="fila" style="justify-content:flex-end;margin-top:10px">
       <button class="btn sec" onClick=${alCerrar}>Cerrar</button>
       ${editable && html`<button class="btn" onClick=${guardar}>Guardar</button>`}
