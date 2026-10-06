@@ -1636,6 +1636,21 @@ function cierreAutomatico(cuerpo) {
   return c;
 }
 
+/* ---------------------------------------------------------------------
+   CONDICIÓN DEL MONTO DEL TRABAJO (sql/41_condicion_monto_trabajo.sql)
+   Junto con "Monto del trabajo" se anota, desde que se carga el pedido, si
+   hay que facturarlo con IVA -- y entonces pedirle los datos de
+   facturación al cliente -- o si lo abona en efectivo en el momento. Es
+   aparte de "Precio sin IVA"/"Facturado"/"Cobrado" de Cobranza: eso se
+   carga después, al cerrar; esto es lo que necesita saber de entrada quien
+   atiende el pedido y, más tarde, el técnico que lee la hoja de ruta.
+   --------------------------------------------------------------------- */
+const OPCIONES_CONDICION_MONTO = ['+IVA', 'EFECTIVO'];
+const ETIQUETAS_CONDICION_MONTO = {
+  '+IVA': '+ IVA (solicitar datos al cliente)',
+  'EFECTIVO': 'Cliente abona en efectivo',
+};
+
 /* =====================================================================
    ACCESO A DATOS
    ===================================================================== */
@@ -1665,6 +1680,7 @@ const COLUMNAS_ESPERADAS = [
   ['fecha_solicitud_factura', '11_puesta_al_dia.sql'],
   ['viaticos', '11_puesta_al_dia.sql'],
   ['monto_trabajo', '38_tipo_y_monto_trabajo.sql'],
+  ['monto_trabajo_condicion', '41_condicion_monto_trabajo.sql'],
 ];
 async function verificarEsquema() {
   const db = cliente();
@@ -3930,7 +3946,7 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
       const datos = { ...b, ...cobranzaViva(), ...(extra || {}) };
       const campos = ['correlativo','n_llamada','cliente_id','equipo_id','tipo_pedido','tipo_servicio',
         'prioridad','estado','cierre','fecha_pedido','fecha_visita','gira_id','orden_gira',
-        'encuesta','horas_mo','obs_servicio','comentarios','monto_trabajo',
+        'encuesta','horas_mo','obs_servicio','comentarios','monto_trabajo','monto_trabajo_condicion',
         'precio_sin_iva','facturado',
         'factura_solicitada','fecha_solicitud_factura','fecha_factura','tipo_factura','concepto',
         'cobrado','fecha_pago','obs_cobranza','encuesta_enviada','fecha_encuesta'];
@@ -4128,10 +4144,15 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
           <fieldset><legend>Atención</legend>
             <${Txt} rot="Observaciones del servicio" area=${3} valor=${b.obs_servicio}
               alCambiar=${v => c('obs_servicio', v)} disabled=${!edObs} />
-            <${Txt} rot="Monto del trabajo" tipo="number" valor=${b.monto_trabajo}
-              alCambiar=${v => c('monto_trabajo', v)} disabled=${!edObs} />
-            <div class="mini">El monto se combina con las observaciones en la hoja de ruta; el
-              usuario de consulta no lo ve.</div>
+            <div class="rejilla dos">
+              <${Txt} rot="Monto del trabajo" tipo="number" valor=${b.monto_trabajo}
+                alCambiar=${v => c('monto_trabajo', v)} disabled=${!edObs} />
+              <${Sel} rot="Condición del monto" valor=${b.monto_trabajo_condicion}
+                opts=${OPCIONES_CONDICION_MONTO} etiquetas=${ETIQUETAS_CONDICION_MONTO}
+                vacio="Sin definir" alCambiar=${v => c('monto_trabajo_condicion', v)} disabled=${!edObs} />
+            </div>
+            <div class="mini">El monto y su condición se combinan con las observaciones en la hoja
+              de ruta; el usuario de consulta no los ve.</div>
             ${nuevo
               ? html`<details>
                   <summary class="mini" style="cursor:pointer;margin:2px 0 8px">
@@ -5234,14 +5255,26 @@ const COLS_HOJA = [
   /* El monto del trabajo (sql/38_tipo_y_monto_trabajo.sql) se combina acá,
      en la misma casilla que las observaciones del servicio: es lo que
      pidió Augusto para que el técnico vea en la hoja de ruta, de un
-     vistazo, qué hay que hacer y cuánto cobrar. El tipo de trabajo no se
-     agrega por separado: ya está cubierto por "Tipo de Pedido", que tiene
-     su propia columna más arriba. El monto se imprime resaltado porque
+     vistazo, qué hay que hacer y cuánto cobrar -- junto con su condición
+     (sql/41_condicion_monto_trabajo.sql: + IVA, pidiendo los datos al
+     cliente, o efectivo en el momento). El tipo de trabajo no se agrega
+     por separado: ya está cubierto por "Tipo de Pedido", que tiene su
+     propia columna más arriba. El monto se imprime resaltado porque
      resaltarMontos() ya reconoce "$" seguido de números (ver RE_MONTO) en
      cualquier texto de esta columna. */
-  ['OBSERVACIONES',        t => [plata(t.monto_trabajo), t.obs_servicio].filter(Boolean).join(' — '),
+  ['OBSERVACIONES',        t => [textoMontoTrabajo(t), t.obs_servicio].filter(Boolean).join(' — '),
                            250, 14.6],
 ];
+/** "$ 50.000 — + IVA (solicitar datos al cliente)": el monto del trabajo
+    junto con su condición, tal como se cargó en la Ficha. */
+function textoMontoTrabajo(t) {
+  const partes = [];
+  if (t.monto_trabajo !== null && t.monto_trabajo !== undefined && t.monto_trabajo !== '')
+    partes.push(plata(t.monto_trabajo));
+  const et = ETIQUETAS_CONDICION_MONTO[t.monto_trabajo_condicion];
+  if (et) partes.push(et);
+  return partes.join(' — ');
+}
 /* Cliente, Ciudad y Provincia son lo primero que hay que ubicar de un
    vistazo en la hoja: van con la columna pintada levemente. */
 const COLS_DESTACADAS = new Set(['Cliente', 'Ciudad', 'Provincia']);
