@@ -495,6 +495,29 @@ legend{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--a
 .tarjeta .sub{font-size:11px;color:var(--suave);margin-top:1px}
 .tarjeta .chispa{display:block;width:100%;height:26px;margin-top:6px;overflow:visible}
 
+/* ---------- tarjetas de equipo (Base de datos → Por equipo) ----------
+   Una caja por equipo, bien separada de las demás, para poder identificar
+   cada uno de un vistazo en vez de seguir una fila angosta en una tabla
+   ancha. Es la alternativa a la tabla de siempre (que sigue estando, con
+   el botón "Tabla" / "Tarjetas"). */
+.tarjetas-equipos{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));
+  gap:12px;align-items:start;margin-bottom:10px}
+.tarjeta-equipo{background:var(--papel);border:1px solid var(--borde);border-radius:12px;
+  padding:12px 14px;box-shadow:var(--sombra-chica);cursor:pointer;
+  transition:box-shadow .12s,border-color .12s}
+.tarjeta-equipo:hover{box-shadow:var(--sombra-chica-hover);border-color:var(--grafito)}
+.tarjeta-equipo.nuevo{cursor:default;border-style:dashed;background:var(--pastel-4)}
+.teq-cab{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+.teq-serie{font-size:16px;font-weight:700;letter-spacing:.01em}
+.teq-sub{color:var(--suave);margin-bottom:8px}
+.teq-datos{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;margin-bottom:8px}
+.teq-datos .rot,.teq-dir .rot{font-size:10px;color:var(--suave);text-transform:uppercase;
+  letter-spacing:.05em;display:block;margin-bottom:1px}
+.teq-dir{margin-bottom:8px}
+.teq-pie{margin-top:10px;padding-top:9px;border-top:1px solid var(--borde-suave);
+  display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+@media (max-width:640px){.tarjetas-equipos{grid-template-columns:1fr}}
+
 /* la foto de arriba de Cobranza: en qué anda cada caso */
 .situacion .apilada{height:30px}
 .casos{display:grid;grid-template-columns:repeat(auto-fit,minmax(146px,1fr));gap:9px;margin-top:12px}
@@ -8099,6 +8122,14 @@ const normCodigo = c => sinAcentos(codigoValido(c) || '').toUpperCase();
    base_datos.sql); consulta la ve siempre de sólo lectura y sin las
    columnas comerciales, porque editar y dar de alta siguen pidiendo
    puedeMaestros()/puedeCrear(), que no la incluyen.
+
+   "Por equipo" se puede ver como tarjetas (una caja por equipo, para
+   distinguirlos de un vistazo -- el modo que arranca por defecto) o como
+   tabla (la planilla de siempre, con scroll de costado); el botón
+   "Tarjetas"/"Tabla" alterna entre las dos sin perder los filtros ni la
+   búsqueda. Las dos vistas comparten exactamente los mismos datos y las
+   mismas acciones (editar dirección, cargar observaciones, abrir la
+   ficha): es nomás una cuestión de cómo se acomodan en la pantalla.
    ===================================================================== */
 function BaseDeDatos() {
   const s = useS();
@@ -8107,6 +8138,7 @@ function BaseDeDatos() {
   const [modo, setModo] = useState('equipos');       // clientes | equipos — arranca en equipos (pedido de Augusto)
   const [abierto, setAbierto] = useState({});        // clientes desplegados
   const [soloNuevos, setSoloNuevos] = useState(false);
+  const [vistaEq, setVistaEq] = useState('tarjetas'); // tarjetas | tabla — sólo aplica a "Por equipo"
   const [editCli, setEditCli] = useState(null);
   const [editEq, setEditEq] = useState(null);
   const [fichaId, setFichaId] = useState(null);
@@ -8313,7 +8345,7 @@ function BaseDeDatos() {
   const colsEq = [
     { rot: 'N° Serie', val: e => e.n_serie }, { rot: 'Modelo', val: e => e.modelo },
     { rot: 'N° Paradas', val: e => e.n_paradas }, { rot: 'Color', val: e => e.inst && e.inst.color },
-    { rot: 'Motorización', val: e => e.motorizacion }, { rot: 'Puerta', val: e => e.puerta },
+    { rot: 'Motorización', val: e => e.motorizacion },
     { rot: 'Fecha de instalación', val: e => fecha(e.fecha_instalacion, 1) },
     { rot: 'Cliente', val: e => nombreCli(e.cliente_id) }, { rot: 'Ciudad', val: e => e.ciudad },
     { rot: 'Provincia', val: e => e.provincia },
@@ -8322,7 +8354,7 @@ function BaseDeDatos() {
     { rot: 'Instaladores', val: e => e.inst && e.inst.instaladores },
     ...(puedeComercial ? [{ rot: 'Atenciones', val: e => (resumenEq.get(e.id) || {}).n || 0 }] : []),
     { rot: 'Garantías', val: e => (resumenEq.get(e.id) || {}).garantias || 0 },
-    { rot: 'Horas', val: e => (resumenEq.get(e.id) || {}).horas || 0 },
+    { rot: 'Horas de trabajo acumulado', val: e => Math.round((resumenEq.get(e.id) || {}).horas || 0) },
     ...(puedeComercial ? [{ rot: 'Última', val: e => fecha((resumenEq.get(e.id) || {}).ultimo, 1) }] : []),
   ];
 
@@ -8343,6 +8375,11 @@ function BaseDeDatos() {
         ${modo === 'equipos' && html`<button class=${'btn chico ' + (soloNuevos ? '' : 'sec')}
           onClick=${() => setSoloNuevos(x => !x)}>
           Sólo nuevos${candidatosAlta.length ? ` (${candidatosAlta.length})` : ''}</button>`}
+        ${modo === 'equipos' && html`<div class="fila" style="gap:4px" title="Cómo mostrar cada equipo">
+          ${[['tarjetas', 'Tarjetas'], ['tabla', 'Tabla']].map(([k, r]) => html`
+            <button class=${'btn chico ' + (vistaEq === k ? '' : 'sec')}
+              onClick=${() => setVistaEq(k)}>${r}</button>`)}
+        </div>`}
         <div style="margin-left:auto" class="fila">
           ${editable && huerfanos.length > 0 && html`<button class="btn sec chico"
             title="Equipos que no tienen cliente asignado" onClick=${vincularHuerfanos}>
@@ -8423,17 +8460,90 @@ function BaseDeDatos() {
         <${Deslizador} para=${caja} />
       </div>
       <div class="mini" style="padding:8px 2px">Tocá un cliente para ver sus equipos; tocá un equipo para abrir su ficha e historial.</div>
+    ` : (vistaEq === 'tarjetas' ? html`
+      <div class="tarjetas-equipos">
+        ${!soloNuevos && equipos.map(e => {
+          const r = resumenEq.get(e.id) || {};
+          const i = e.inst;
+          const obs = i && (i.obs_instalaciones || i.obs_comercial || i.obs_produccion);
+          const dir = e.direccion || (i && i.direccion_instalacion) || '';
+          return html`<div class="tarjeta-equipo" key=${e.id} onClick=${() => setEditEq(e)}>
+            <div class="teq-cab">
+              <span class="teq-serie">${e.n_serie}</span>
+              <span class="et verde">En el sistema</span>
+            </div>
+            <div class="mini teq-sub">${[e.modelo, e.n_paradas && e.n_paradas + ' paradas',
+              (i && i.color), e.motorizacion].filter(Boolean).join(' · ') || 'Sin datos del equipo'}</div>
+            <div class="teq-datos">
+              <div><span class="rot">Cliente</span>${nombreCli(e.cliente_id) || 'sin cliente'}</div>
+              <div><span class="rot">Ciudad / Provincia</span>${[e.ciudad, e.provincia].filter(Boolean).join(' · ') || '—'}</div>
+            </div>
+            <div class="teq-dir" onClick=${ev => puedeAlta && ev.stopPropagation()}>
+              <span class="rot">Dirección de instalación</span>
+              ${puedeAlta
+                ? html`<${CampoGrilla} valor=${dir} ancho=${260}
+                    titulo="Dirección de instalación" placeholder="Sin cargar…"
+                    onGuardar=${v => guardarDireccionEquipo(e, v)} />`
+                : html`<span title=${dir}>${dir || '—'}</span>`}
+            </div>
+            ${((i && i.vendedor) || (i && i.instaladores)) && html`<div class="mini">
+              ${i.vendedor ? 'Vendedor: ' + i.vendedor : ''}${i.vendedor && i.instaladores ? ' · ' : ''}
+              ${i.instaladores ? 'Instaladores: ' + i.instaladores : ''}</div>`}
+            <div class="teq-pie">
+              <span class="mini">${e.fecha_instalacion ? 'Instalado ' + fecha(e.fecha_instalacion, 1) : ''}</span>
+              <span class="mini">
+                ${puedeComercial ? (r.n || 0) + ' atenc. · ' : ''}${r.garantias || 0} en garantía
+                · ${r.horas ? Math.round(r.horas) : 0} h acum.${puedeComercial && r.ultimo ? ' · últ. ' + fecha(r.ultimo, 1) : ''}</span>
+              ${(i && (puedeAlta || obs)) && html`<button class="btn sec chico"
+                onClick=${ev => { ev.stopPropagation(); setVerObs(i); }}>${obs ? 'Ver observaciones' : 'Cargar observaciones'}</button>`}
+            </div>
+          </div>`;
+        })}
+        ${nuevosFiltrados.map(c => {
+          const obsC = c.obs_instalaciones || c.obs_comercial || c.obs_produccion;
+          return html`<div class="tarjeta-equipo nuevo" key=${'n' + c.cod} title="Todavía no está dado de alta">
+            <div class="teq-cab">
+              <span class="teq-serie">${c.codigo}</span>
+              <span class="et ambar">Nuevo</span>
+            </div>
+            <div class="mini teq-sub">${[c.modelo, c.niveles && c.niveles + ' paradas',
+              c.color, c.motorizacion].filter(Boolean).join(' · ') || 'Sin datos del equipo'}</div>
+            <div class="teq-datos">
+              <div><span class="rot">Cliente (sin dar de alta)</span>${c.nombre_cliente || '—'}</div>
+              <div><span class="rot">Ubicación de origen</span><span title=${c.ubicacion}>${c.ubicacion || '—'}</span></div>
+            </div>
+            <div class="teq-dir" onClick=${ev => puedeAlta && ev.stopPropagation()}>
+              <span class="rot">Dirección de instalación</span>
+              ${puedeAlta
+                ? html`<${CampoGrilla} valor=${c.direccion_instalacion} ancho=${260}
+                    titulo="Dirección de instalación (se carga a mano)" placeholder="Sin cargar…"
+                    onGuardar=${v => guardarDireccion(c, v)} />`
+                : html`<span title=${c.direccion_instalacion}>${c.direccion_instalacion || '—'}</span>`}
+            </div>
+            ${(c.vendedor || c.instaladores) && html`<div class="mini">
+              ${c.vendedor ? 'Vendedor: ' + c.vendedor : ''}${c.vendedor && c.instaladores ? ' · ' : ''}
+              ${c.instaladores ? 'Instaladores: ' + c.instaladores : ''}</div>`}
+            <div class="teq-pie">
+              <span class="mini">${c.fecha_instalacion ? 'Instalado ' + fecha(c.fecha_instalacion, 1) : ''}</span>
+              <span></span>
+              ${(puedeAlta || obsC) && html`<button class="btn sec chico" onClick=${() => setVerObs(c)}>
+                ${obsC ? 'Ver observaciones' : 'Cargar observaciones'}</button>`}
+            </div>
+          </div>`;
+        })}
+      </div>
+      ${!equipos.length && !nuevosFiltrados.length && html`<div class="vacio">Ningún equipo coincide con la búsqueda.</div>`}
     ` : html`
       <div class="tabla-caja panel" ref=${caja}>
         <table class="grilla">
           <thead><tr>
             <th class="congelada">N° Serie</th><th>Mod.</th><th>Par.</th><th>Color</th>
-            <th>Motoriz.</th><th>Puerta</th><th>Instalación</th>
+            <th>Motoriz.</th><th>Instalación</th>
             <th style="min-width:200px">Cliente</th><th>Ciudad</th><th>Provincia</th>
             <th style="min-width:200px">Dirección de instalación</th>
             <th>Vendedor</th><th style="min-width:140px">Instaladores</th><th>Obs.</th>
             ${puedeComercial && html`<th class="der">Atenc.</th>`}
-            <th class="der">Garantías</th><th class="der">Horas</th>
+            <th class="der">Garantías</th><th class="der" style="min-width:110px">Horas de trabajo acumulado</th>
             ${puedeComercial && html`<th>Última</th>`}
             <th>En el sistema</th>
           </tr></thead>
@@ -8445,7 +8555,7 @@ function BaseDeDatos() {
               return html`<tr key=${e.id} onClick=${() => setEditEq(e)}>
                 <td class="congelada"><b>${e.n_serie}</b></td><td>${e.modelo || ''}</td>
                 <td>${e.n_paradas || ''}</td><td>${(i && i.color) || ''}</td>
-                <td>${e.motorizacion || ''}</td><td>${e.puerta || ''}</td>
+                <td>${e.motorizacion || ''}</td>
                 <td>${fecha(e.fecha_instalacion)}</td>
                 <td class=${e.cliente_id ? '' : 'mini'}>${nombreCli(e.cliente_id) || 'sin cliente'}</td>
                 <td>${e.ciudad || ''}</td><td>${e.provincia || ''}</td>
@@ -8465,7 +8575,7 @@ function BaseDeDatos() {
                   onClick=${ev => { ev.stopPropagation(); setVerObs(i); }}>${obs ? 'Ver' : 'Cargar'}</button>` : ''}</td>
                 ${puedeComercial && html`<td class="num">${r.n || 0}</td>`}
                 <td class="num">${r.garantias || 0}</td>
-                <td class="num">${r.horas || ''}</td>
+                <td class="num">${r.horas ? Math.round(r.horas) : ''}</td>
                 ${puedeComercial && html`<td>${fecha(r.ultimo)}</td>`}
                 <td><span class="et verde">Sí</span></td>
               </tr>`;
@@ -8473,7 +8583,7 @@ function BaseDeDatos() {
             ${nuevosFiltrados.map(c => html`<tr key=${'n' + c.cod} title="Todavía no está dado de alta">
               <td class="congelada"><b>${c.codigo}</b></td><td>${c.modelo || ''}</td>
               <td>${c.niveles || ''}</td><td>${c.color || ''}</td>
-              <td>${c.motorizacion || ''}</td><td>—</td>
+              <td>${c.motorizacion || ''}</td>
               <td>${fecha(c.fecha_instalacion)}</td>
               <td class="mini">${c.nombre_cliente || ''} (sin dar de alta)</td>
               <td colspan="2" title=${c.ubicacion}>${c.ubicacion || ''}</td>
@@ -8502,7 +8612,7 @@ function BaseDeDatos() {
         ${!equipos.length && !nuevosFiltrados.length && html`<div class="vacio">Ningún equipo coincide con la búsqueda.</div>`}
         <${Deslizador} para=${caja} />
       </div>
-    `}
+    `)}
 
     ${editCli && html`<${EditarCliente} c=${editCli} alCerrar=${() => setEditCli(null)} alAbrirTrabajo=${setFichaId} />`}
     ${editEq && html`<${EditarEquipo} e=${editEq} alCerrar=${() => setEditEq(null)} alAbrirTrabajo=${setFichaId} />`}
