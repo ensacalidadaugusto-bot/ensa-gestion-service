@@ -305,6 +305,11 @@ table.grilla.registro tbody tr td:last-child{border-right:1px solid var(--borde)
 /* el canto de color según en qué anda el trabajo */
 table.grilla.registro tbody tr.tono-listo  {--canto:var(--ok)}
 table.grilla.registro tbody tr.tono-abierto{--canto:var(--error)}
+/* cumplido, pero todavía no se cargó el estado de facturación/cobranza: se
+   pinta igual que un trabajo todavía por hacer (mismo amarillo de "por-hacer",
+   fila y canto), para que salte a la vista como algo pendiente de completar,
+   distinto del rojo que es "ya está todo definido y sólo falta cerrar" */
+table.grilla.registro tbody tr.tono-sin-facturar{--canto:var(--fila-hacer-b)}
 /* cerrado, pero con un pago viejo pendiente: ni "hecho" (verde) ni "urgente
    por cerrar" (rojo) -- un tercer color, más discreto, para no confundirlo
    con el trabajo que sí necesita atención hoy */
@@ -496,27 +501,33 @@ legend{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--a
 .tarjeta .chispa{display:block;width:100%;height:26px;margin-top:6px;overflow:visible}
 
 /* ---------- tarjetas de equipo (Base de datos → Por equipo) ----------
-   Una caja por equipo, bien separada de las demás, para poder identificar
-   cada uno de un vistazo en vez de seguir una fila angosta en una tabla
-   ancha. Es la alternativa a la tabla de siempre (que sigue estando, con
-   el botón "Tabla" / "Tarjetas"). */
-.tarjetas-equipos{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));
-  gap:12px;align-items:start;margin-bottom:10px}
+   Una fila de ancho completo por equipo, bien separada de las demás, para
+   poder identificar cada uno de un vistazo en vez de seguir una fila
+   angosta en una tabla ancha. Adentro, los datos se acomodan en
+   horizontal (un bloque "rótulo arriba / valor abajo" al lado del otro,
+   con wrap si no entran) en vez de apilarse. Es la alternativa a la tabla
+   de siempre (que sigue estando, con el botón "Tabla" / "Tarjetas"). */
+.tarjetas-equipos{display:flex;flex-direction:column;gap:10px;margin-bottom:10px}
 .tarjeta-equipo{background:var(--papel);border:1px solid var(--borde);border-radius:12px;
-  padding:12px 14px;box-shadow:var(--sombra-chica);cursor:pointer;
+  padding:12px 16px;box-shadow:var(--sombra-chica);cursor:pointer;
+  display:flex;align-items:center;flex-wrap:wrap;gap:8px 22px;
   transition:box-shadow .12s,border-color .12s}
 .tarjeta-equipo:hover{box-shadow:var(--sombra-chica-hover);border-color:var(--grafito)}
 .tarjeta-equipo.nuevo{cursor:default;border-style:dashed;background:var(--pastel-4)}
-.teq-cab{display:flex;align-items:center;gap:8px;margin-bottom:2px}
-.teq-serie{font-size:16px;font-weight:700;letter-spacing:.01em}
-.teq-sub{color:var(--suave);margin-bottom:8px}
-.teq-datos{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;margin-bottom:8px}
-.teq-datos .rot,.teq-dir .rot{font-size:10px;color:var(--suave);text-transform:uppercase;
-  letter-spacing:.05em;display:block;margin-bottom:1px}
-.teq-dir{margin-bottom:8px}
-.teq-pie{margin-top:10px;padding-top:9px;border-top:1px solid var(--borde-suave);
-  display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
-@media (max-width:640px){.tarjetas-equipos{grid-template-columns:1fr}}
+.teq-cab{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+.teq-serie{font-size:16px;font-weight:700;letter-spacing:.01em;white-space:nowrap}
+.teq-campo{display:flex;flex-direction:column;gap:1px;min-width:0;flex:0 1 auto}
+.teq-campo .rot{font-size:10px;color:var(--suave);text-transform:uppercase;
+  letter-spacing:.05em;white-space:nowrap}
+.teq-campo .val{max-width:260px;overflow-wrap:break-word}
+.teq-pie{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-left:auto;
+  padding-left:14px;border-left:1px solid var(--borde-suave)}
+@media (max-width:900px){
+  .tarjeta-equipo{align-items:stretch}
+  .teq-pie{margin-left:0;padding-left:0;border-left:0;width:100%;
+    padding-top:8px;border-top:1px solid var(--borde-suave)}
+  .teq-campo .val{max-width:none}
+}
 
 /* la foto de arriba de Cobranza: en qué anda cada caso */
 .situacion .apilada{height:30px}
@@ -1490,6 +1501,10 @@ function soloFaltanObservaciones(t) {
   const f = faltaParaCerrar(t);
   return f.length === 1 && f[0] === 'cargar las observaciones del servicio';
 }
+/** Cumplido, pero todavía no se cargó el estado de facturación/cobranza */
+function faltaFacturacion(t) {
+  return !cobradoEnMano(t) && (!t.facturado || FACT_SIN_DEFINIR.includes(t.facturado));
+}
 /* "PENDIENTE COBRANZA": un tercer estado de cierre, además de ABIERTO y
    CERRADO. Es para casos viejos que no se van a cobrar en lo inmediato:
    saca al trabajo de la cola de "cumplidos sin cerrar" (ya no hace falta
@@ -1570,18 +1585,24 @@ function mesesDesde(fechaISO) {
 /** Trabajo todavía por hacer: se pinta en amarillo en el registro */
 function porHacer(t) { return t.estado === 'PENDIENTE' || t.estado === 'PROGRAMADO'; }
 
-/* El color del canto izquierdo de cada tarjeta del registro. Es la respuesta
+/* El color del canto izquierdo de cada tarjeta del registro (y, para los dos
+   casos "amarillo", también el fondo de toda la fila). Es la respuesta
    a "¿en qué anda este trabajo?" de un solo vistazo, sin leer nada:
-     verde  — hecho y cerrado, no hay nada más que hacer
-     rojo   — hecho pero sin cerrar: espera factura u observaciones
-     ámbar  — todavía por hacer
-     azul   — en revisión o a reprogramar
-     gris   — cancelado */
+     verde    — hecho y cerrado, no hay nada más que hacer
+     amarillo — hecho, pero todavía no se cargó el estado de facturación/cobranza:
+                se pinta igual que "todavía por hacer", porque es lo mismo que
+                está pendiente, del lado administrativo
+     rojo     — hecho, la facturación ya está definida, pero falta cerrar
+                (cargar las observaciones del servicio)
+     amarillo — todavía por hacer (PENDIENTE/PROGRAMADO)
+     azul     — en revisión o a reprogramar
+     gris     — cancelado */
 function tonoDeFila(t) {
   if (t.estado === 'CANCELA VISITA') return 'gris';
   if (t.estado === 'CUMPLIDO') {
     if (t.cierre === 'CERRADO') return 'listo';
     if (t.cierre === CIERRE_PENDIENTE_COBRANZA) return 'pendiente-cobranza';
+    if (faltaFacturacion(t)) return 'sin-facturar';
     return 'abierto';
   }
   if (porHacer(t)) return 'hacer';
@@ -2843,6 +2864,241 @@ function ultimoRespaldo() {
   return { cuando: cual, dias, quien: (S.config && S.config.ultimo_respaldo_quien) || null };
 }
 
+/* =====================================================================
+   LECTOR DE .XLSX (la otra mitad del escritor de arriba)
+   También a mano, sin librerías: un .xlsx es un ZIP con XML adentro.
+   Se usa hoy sólo para importar el registro de instalaciones (ver
+   app/80_maestros.js, "Importar instalaciones"), así que lee nomás lo que
+   hace falta para eso -- la primera hoja del archivo, por nombre de
+   columna -- y no pretende ser un lector de Excel genérico.
+   ===================================================================== */
+
+/** Descomprime con el motor del navegador (deflate-raw, lo mismo que usa
+    el escritor de arriba, dado vuelta). */
+async function inflar(bytes) {
+  if (typeof DecompressionStream === 'undefined') {
+    throw new Error('Este navegador no puede leer archivos .xlsx (falta DecompressionStream). Probá con Chrome o Edge actualizados.');
+  }
+  const flujo = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(flujo).arrayBuffer());
+}
+
+/** Lee el directorio central del ZIP (dónde está cada archivo adentro,
+    sin descomprimir todavía) buscando el "fin de directorio central"
+    desde el final del archivo, como indica el formato ZIP. */
+function leerCentralZip(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let fin = -1;
+  const minPos = Math.max(0, bytes.length - 65557);
+  for (let i = bytes.length - 22; i >= minPos; i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { fin = i; break; }
+  }
+  if (fin < 0) throw new Error('El archivo no parece un .xlsx válido (no se encontró el índice del ZIP).');
+  const nEntradas = dv.getUint16(fin + 10, true);
+  const offCentral = dv.getUint32(fin + 16, true);
+  const entradas = new Map();
+  let p = offCentral;
+  for (let i = 0; i < nEntradas; i++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const metodo = dv.getUint16(p + 10, true);
+    const compSize = dv.getUint32(p + 20, true);
+    const nomLen = dv.getUint16(p + 28, true);
+    const extraLen = dv.getUint16(p + 30, true);
+    const comLen = dv.getUint16(p + 32, true);
+    const offsetLocal = dv.getUint32(p + 42, true);
+    const nombre = new TextDecoder().decode(bytes.subarray(p + 46, p + 46 + nomLen));
+    entradas.set(nombre, { metodo, compSize, offsetLocal });
+    p += 46 + nomLen + extraLen + comLen;
+  }
+  return entradas;
+}
+
+/** Saca un archivo de adentro del ZIP, ya descomprimido y como texto. */
+async function extraerZip(bytes, entradas, nombre) {
+  const e = entradas.get(nombre);
+  if (!e) return null;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const p = e.offsetLocal;
+  if (dv.getUint32(p, true) !== 0x04034b50) throw new Error('ZIP dañado (cabecera local inválida) en ' + nombre);
+  const nomLen = dv.getUint16(p + 26, true);
+  const extraLen = dv.getUint16(p + 28, true);
+  const inicio = p + 30 + nomLen + extraLen;
+  const comp = bytes.subarray(inicio, inicio + e.compSize);
+  const datos = e.metodo === 0 ? comp : await inflar(comp);
+  return new TextDecoder('utf-8').decode(datos);
+}
+
+function descodificarXml(s) {
+  return s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(+n))
+    .replace(/&amp;/g, '&');
+}
+
+/** xl/sharedStrings.xml: Excel no repite el texto en cada celda, guarda
+    una lista única y cada celda de texto apunta a un índice acá. */
+function parseSharedStrings(xml) {
+  if (!xml) return [];
+  const out = [];
+  const reSi = /<si>([\s\S]*?)<\/si>/g;
+  let m;
+  while ((m = reSi.exec(xml))) {
+    let texto = '';
+    const reT = /<t[^>]*>([\s\S]*?)<\/t>/g;
+    let mt;
+    while ((mt = reT.exec(m[1]))) texto += mt[1];
+    out.push(descodificarXml(texto));
+  }
+  return out;
+}
+
+function letraAIndice(letras) {
+  let n = 0;
+  for (let i = 0; i < letras.length; i++) n = n * 26 + (letras.charCodeAt(i) - 64);
+  return n - 1; // 0-based
+}
+
+/** Las filas de la hoja, como arreglo de arreglos (una posición por
+    columna, 0-based; los huecos quedan "undefined"). Resuelve cada celda
+    según su tipo: texto compartido (t="s"), texto suelto (t="inlineStr"),
+    o número/fecha sin resolver todavía (eso se decide después, columna
+    por columna, en leerRegistroInstalaciones). */
+function parseFilasHoja(xml, compartidas) {
+  const filas = [];
+  const reRow = /<row\b[^>]*>([\s\S]*?)<\/row>/g;
+  let mr;
+  while ((mr = reRow.exec(xml))) {
+    const fila = [];
+    const reC = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+    let mc;
+    while ((mc = reC.exec(mr[1]))) {
+      const attrs = mc[1] || '', inner = mc[2] || '';
+      const rMatch = attrs.match(/r="([A-Z]+)\d+"/);
+      if (!rMatch) continue;
+      const col = letraAIndice(rMatch[1]);
+      const tMatch = attrs.match(/t="([a-zA-Z]+)"/);
+      const tipo = tMatch ? tMatch[1] : null;
+      let valor = null;
+      if (tipo === 'inlineStr') {
+        const tInner = inner.match(/<is>([\s\S]*?)<\/is>/);
+        const tMatch2 = (tInner ? tInner[1] : inner).match(/<t[^>]*>([\s\S]*?)<\/t>/);
+        valor = tMatch2 ? descodificarXml(tMatch2[1]) : '';
+      } else {
+        const vMatch = inner.match(/<v>([\s\S]*?)<\/v>/);
+        const vRaw = vMatch ? vMatch[1] : null;
+        if (vRaw === null) valor = null;
+        else if (tipo === 's') valor = compartidas[Number(vRaw)] ?? '';
+        else if (tipo === 'b') valor = vRaw === '1';
+        else if (tipo === 'str') valor = descodificarXml(vRaw);
+        else valor = Number(vRaw);
+      }
+      fila[col] = valor;
+    }
+    filas.push(fila);
+  }
+  return filas;
+}
+
+/** El número de serie de fecha de Excel (días desde el 30/12/1899) a
+    "AAAA-MM-DD". Es la cuenta inversa de serieFecha(), de más arriba. */
+function fechaDeSerie(serie) {
+  if (serie === null || serie === undefined || serie === '' || isNaN(Number(serie))) return null;
+  const ms = Number(serie) * 86400000 + new Date('1899-12-30T12:00:00').getTime();
+  const d = new Date(ms);
+  return isNaN(d) ? null : d.toISOString().slice(0, 10);
+}
+
+function limpiarCelda(v) {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  return s === '' ? null : s;
+}
+
+/** Lee el registro de instalaciones desde un .xlsx como el que arma
+    Augusto a mano (columnas: Nombre del cliente, Teléfono, Codigo,
+    Modelo, Niveles, Color, Motorizacion, Vendedor, Instaladores, Fecha,
+    Ubicación, y las tres observaciones por área). Busca cada columna por
+    su nombre en la primera fila, así no importa el orden ni si hay
+    alguna de más (por ejemplo "Desarmable", "Responsable de Obra" o
+    "Distancia al domicilio desde Parana", que hoy no se guardan en la
+    base porque instalaciones no tiene esas columnas). Devuelve un
+    arreglo de objetos, uno por fila con datos, listos para insertar en
+    la tabla instalaciones (sin el id ni creado_en). */
+async function leerRegistroInstalaciones(bytes) {
+  const entradas = leerCentralZip(bytes);
+  const workbookXml = await extraerZip(bytes, entradas, 'xl/workbook.xml');
+  if (!workbookXml) throw new Error('No es un archivo .xlsx válido (no tiene xl/workbook.xml).');
+
+  let hojaPath = 'xl/worksheets/sheet1.xml';
+  try {
+    const relsXml = await extraerZip(bytes, entradas, 'xl/_rels/workbook.xml.rels');
+    const mSheet = workbookXml.match(/<sheet\b[^>]*\/>/);
+    const ridM = mSheet && mSheet[0].match(/r:id="([^"]+)"/);
+    if (relsXml && ridM) {
+      const relM = relsXml.match(new RegExp('<Relationship[^>]*Id="' + ridM[1] + '"[^>]*Target="([^"]+)"'));
+      if (relM) hojaPath = 'xl/' + relM[1].replace(/^\.?\/?(xl\/)?/, '');
+    }
+  } catch (e) { /* si algo de esto falla, nos quedamos con sheet1.xml */ }
+
+  const sheetXml = (await extraerZip(bytes, entradas, hojaPath))
+    || (await extraerZip(bytes, entradas, 'xl/worksheets/sheet1.xml'));
+  if (!sheetXml) throw new Error('No se encontró ninguna hoja dentro del archivo.');
+
+  const sharedXml = await extraerZip(bytes, entradas, 'xl/sharedStrings.xml');
+  const compartidas = parseSharedStrings(sharedXml);
+  const filas = parseFilasHoja(sheetXml, compartidas);
+  if (!filas.length) return [];
+
+  const encabezado = (filas[0] || []).map(v => sinAcentos(String(v ?? '').trim().toLowerCase()));
+  const buscar = (...alternativas) => {
+    for (const alt of alternativas) {
+      const i = encabezado.findIndex(h => h.replace(/\s+/g, ' ').trim() === sinAcentos(alt));
+      if (i >= 0) return i;
+    }
+    return -1;
+  };
+  const col = {
+    nombre_cliente: buscar('nombre del cliente'),
+    telefono: buscar('telefono'),
+    codigo: buscar('codigo'),
+    modelo: buscar('modelo'),
+    niveles: buscar('niveles'),
+    color: buscar('color'),
+    motorizacion: buscar('motorizacion'),
+    vendedor: buscar('vendedor'),
+    instaladores: buscar('instaladores'),
+    fecha: buscar('fecha'),
+    ubicacion: buscar('ubicacion'),
+    obs_instalaciones: buscar('observaciones de la instalacion (area instalaciones)'),
+    obs_comercial: buscar('observaciones de la instalacion (area comercial)'),
+    obs_produccion: buscar('observaciones de la instalacion (area produccion)'),
+  };
+  if (col.codigo < 0 || col.fecha < 0) {
+    throw new Error('No se reconocen las columnas "Codigo" y "Fecha" en la primera fila del archivo. '
+      + '¿Es la hoja del registro de instalaciones?');
+  }
+
+  const out = [];
+  for (let i = 1; i < filas.length; i++) {
+    const f = filas[i];
+    if (!f) continue;
+    const codigo = limpiarCelda(f[col.codigo]);
+    if (!codigo) continue;
+    const fechaVal = f[col.fecha];
+    const fecha_instalacion = typeof fechaVal === 'number' ? fechaDeSerie(fechaVal)
+      : (fechaVal ? String(fechaVal).trim().slice(0, 10) : null);
+    const val = k => (col[k] >= 0 ? limpiarCelda(f[col[k]]) : null);
+    out.push({
+      codigo, fecha_instalacion,
+      nombre_cliente: val('nombre_cliente'), telefono: val('telefono'), modelo: val('modelo'),
+      niveles: val('niveles'), color: val('color'), motorizacion: val('motorizacion'),
+      vendedor: val('vendedor'), instaladores: val('instaladores'), ubicacion: val('ubicacion'),
+      obs_instalaciones: val('obs_instalaciones'), obs_comercial: val('obs_comercial'),
+      obs_produccion: val('obs_produccion'),
+    });
+  }
+  return out;
+}
+
 
 /* ===== 20_ui.js ===== */
 /* =====================================================================
@@ -3421,8 +3677,8 @@ function Trabajos() {
                   aria-hidden="true"><td></td></tr>` : null,
             html`<tr key=${t.id}
               class=${['tono-' + tonoDeFila(t),
-                       porHacer(t) ? 'por-hacer' : '',
-                       verPlata && estaAbierto(t) ? 'sin-cerrar' : '',
+                       (porHacer(t) || (t.estado === 'CUMPLIDO' && faltaFacturacion(t))) ? 'por-hacer' : '',
+                       verPlata && estaAbierto(t) && !faltaFacturacion(t) ? 'sin-cerrar' : '',
                        String(s.destacado) === String(t.id) ? 'recien' : '',
                        corteDeSemana.has(t.id) ? 'otra-semana' : '',
                        t.sin_sincronizar ? 'en-cola' : ''].filter(Boolean).join(' ')}
@@ -5722,7 +5978,7 @@ function CampoGrilla({ valor, onGuardar, ancho, titulo, area, numero, placeholde
 
 function Cobranza() {
   const s = useS();
-  const [vista, setVista] = useState('a_cobrar');  // a_cobrar | facturado_en_curso | sin_cerrar | todo | todos_registros
+  const [vista, setVista] = useState('a_cobrar');  // a_cobrar | facturado_en_curso | sin_cerrar | facturacion_cargada | todo | todos_registros
   const [busca, setBusca] = useState('');
   const [anio, setAnio] = useState('');
   const [mes, setMes] = useState('');
@@ -5730,6 +5986,42 @@ function Cobranza() {
   const [tope, setTope] = useState(400);
   const [verLeyenda, setVerLeyenda] = useState(false);
   useEffect(() => { setTope(400); }, [vista, busca, anio, mes]);
+
+  /* "Facturación cargada": los casos CUMPLIDOS a los que, en el período
+     elegido, se les tocó algún dato de facturación (facturado, fecha de
+     factura, precio, tipo de factura, concepto o si se solicitó la
+     factura) -- para juntarlos de una y mandarle a Administración la
+     planilla del día (o del período que se elija), sin tener que ir
+     revisando caso por caso quién se cargó hoy. Se arma consultando la
+     auditoría (sql/01_esquema.sql: cada UPDATE de trabajos deja asentado
+     QUÉ columnas cambiaron y cuándo), no con un campo nuevo en trabajos. */
+  const CAMPOS_FACTURACION = ['facturado', 'fecha_factura', 'precio_sin_iva', 'tipo_factura',
+    'concepto', 'factura_solicitada', 'fecha_solicitud_factura'];
+  const [cargadoDesde, setCargadoDesde] = useState(() => hoyISO());
+  const [cargadoHasta, setCargadoHasta] = useState(() => hoyISO());
+  const [idsFacturacionCargada, setIdsFacturacionCargada] = useState(null); // null = todavía no se consultó
+  const [buscandoCargados, setBuscandoCargados] = useState(false);
+  useEffect(() => {
+    if (vista !== 'facturacion_cargada') return;
+    let cancelado = false;
+    setBuscandoCargados(true);
+    let q = cliente().from('auditoria').select('registro_id, cambios')
+      .eq('tabla', 'trabajos').eq('accion', 'UPDATE').limit(5000);
+    if (cargadoDesde) q = q.gte('fecha', cargadoDesde + 'T00:00:00');
+    if (cargadoHasta) q = q.lte('fecha', cargadoHasta + 'T23:59:59');
+    q.then(({ data, error }) => {
+      if (cancelado) return;
+      setBuscandoCargados(false);
+      if (error) { toast('No se pudo consultar quién se cargó: ' + error.message, 'error'); setIdsFacturacionCargada(new Set()); return; }
+      const ids = new Set();
+      (data || []).forEach(fila => {
+        const claves = Object.keys(fila.cambios || {});
+        if (claves.some(k => CAMPOS_FACTURACION.includes(k))) ids.add(fila.registro_id);
+      });
+      setIdsFacturacionCargada(ids);
+    });
+    return () => { cancelado = true; };
+  }, [vista, cargadoDesde, cargadoHasta]);
   /* El caso desde el que se llegó por "Abrir este trabajo en Cobranza →" (en
      el Registro de Service) queda resaltado en la grilla, no sólo abierto en
      la ficha: así no se pierde de vista entre el resto de los registros. Se
@@ -5791,20 +6083,27 @@ function Cobranza() {
     if (vista === 'a_cobrar') return enCirculo(t) && !CERRADO_COBRO.includes(t.cobrado);
     if (vista === 'facturado_en_curso') return t.facturado === 'EN CURSO'
       && !CERRADO_COBRO.includes(t.cobrado) && !t.fecha_pago;
+    if (vista === 'facturacion_cargada') return t.estado === 'CUMPLIDO'
+      && !!idsFacturacionCargada && idsFacturacionCargada.has(t.id);
     if (vista === 'todos_registros') return true;
     return enCirculo(t);
-  }), [s.trabajos, vista]);
+  }), [s.trabajos, vista, idsFacturacionCargada]);
 
   const filtrados = useMemo(() => {
     const f = sinAcentos(busca);
     return ordenar(base.filter(t => {
-      const ref = String(t.fecha_factura || t.fecha_visita || '');
-      if (anio && ref.slice(0, 4) !== anio) return false;
-      if (mes && ref.slice(5, 7) !== mes) return false;
+      // el año/mes es un filtro aparte, por fecha de factura: en "Facturación
+      // cargada" el período ya lo define el rango de arriba (cuándo se tocó
+      // el dato), así que acá no se vuelve a acotar por eso.
+      if (vista !== 'facturacion_cargada') {
+        const ref = String(t.fecha_factura || t.fecha_visita || '');
+        if (anio && ref.slice(0, 4) !== anio) return false;
+        if (mes && ref.slice(5, 7) !== mes) return false;
+      }
       return !f || sinAcentos([t.cliente_nombre, t.n_serie, t.concepto, t.n_llamada, t.cliente_cuit,
         t.cliente_correo, t.obs_cobranza].join(' ')).includes(f);
     }), orden);
-  }, [base, busca, anio, mes, orden]);
+  }, [base, busca, anio, mes, orden, vista]);
 
   const anios = useMemo(() => [...new Set(s.trabajos
     .map(t => String(t.fecha_factura || t.fecha_visita || '').slice(0, 4))
@@ -5947,18 +6246,27 @@ function Cobranza() {
            ['facturado_en_curso', `Facturado en curso, sin cobrar (${
              s.trabajos.filter(t => t.facturado === 'EN CURSO' && !CERRADO_COBRO.includes(t.cobrado) && !t.fecha_pago).length})`],
            ['sin_cerrar', `Cumplidos sin cerrar (${s.trabajos.filter(estaAbierto).length})`],
+           ['facturacion_cargada', 'Facturación cargada'],
            ['todo', 'Todo lo facturable'],
            ['todos_registros', `Todos los registros (${s.trabajos.length})`]]
           .map(([k, r]) => html`<button class=${'btn chico ' + (vista === k ? '' : 'sec')}
             onClick=${() => { setVista(k); setDestacado(null); }}>${r}</button>`)}
         <input style="max-width:250px" placeholder="Buscar cliente, concepto, CUIT…" value=${busca}
           onInput=${e => { setBusca(e.target.value); setDestacado(null); }} />
-        <${Sel} valor=${anio} opts=${anios} vacio="Año: todos" alCambiar=${setAnio} />
-        <select style="width:auto" value=${mes} onChange=${e => setMes(e.target.value)}
-          title="Mes de la factura (o del trabajo, si todavía no se facturó)">
-          <option value="">Mes: todos</option>
-          ${MESES_OPC.map(m => html`<option value=${m.v}>${m.r[0].toUpperCase() + m.r.slice(1)}</option>`)}
-        </select>
+        ${vista === 'facturacion_cargada'
+          ? html`<div class="fila" style="gap:5px" title="Casos CUMPLIDOS a los que se les tocó algún dato de facturación en este período">
+              <span class="mini">Cargado entre</span>
+              <input type="date" style="width:140px" value=${cargadoDesde} onChange=${e => setCargadoDesde(e.target.value || '')} />
+              <span class="mini">y</span>
+              <input type="date" style="width:140px" value=${cargadoHasta} onChange=${e => setCargadoHasta(e.target.value || '')} />
+              ${buscandoCargados && html`<span class="mini">Buscando…</span>`}
+            </div>`
+          : html`<${Sel} valor=${anio} opts=${anios} vacio="Año: todos" alCambiar=${setAnio} />
+              <select style="width:auto" value=${mes} onChange=${e => setMes(e.target.value)}
+                title="Mes de la factura (o del trabajo, si todavía no se facturó)">
+                <option value="">Mes: todos</option>
+                ${MESES_OPC.map(m => html`<option value=${m.v}>${m.r[0].toUpperCase() + m.r.slice(1)}</option>`)}
+              </select>`}
         <div style="margin-left:auto" class="fila">
           ${editable && seleccion.size > 0 && html`<button class="btn sec chico"
             onClick=${() => setSeleccion(new Set())}>Quitar selección (${seleccion.size})</button>`}
@@ -6905,6 +7213,9 @@ function Productividad() {
           ['minutos', totalMinutos.toLocaleString('es-AR')],
           ['subtotal', plata(subtotal)],
         ]} />
+        <div class="mini">Entran todos los trabajos del mes con estado <b>Cumplido</b>, estén o
+          no cerrados por facturación: un service ya hecho suma para la productividad del técnico
+          aunque la definición de facturación o el cierre administrativo todavía estén pendientes.</div>
         ${semanas.length > 0 && html`<div class="semanas-prod">
           ${semanas.map(w => html`<div class="sem" key=${w.lunes}>
             <div class="mini">Semana del ${fecha(w.lunes, 1)}</div>
@@ -8139,6 +8450,7 @@ function BaseDeDatos() {
   const [abierto, setAbierto] = useState({});        // clientes desplegados
   const [soloNuevos, setSoloNuevos] = useState(false);
   const [vistaEq, setVistaEq] = useState('tarjetas'); // tarjetas | tabla — sólo aplica a "Por equipo"
+  const [importando, setImportando] = useState(false);
   const [editCli, setEditCli] = useState(null);
   const [editEq, setEditEq] = useState(null);
   const [fichaId, setFichaId] = useState(null);
@@ -8211,6 +8523,17 @@ function BaseDeDatos() {
   }, [instalacionPorCodigo, s.equipos]);
 
   const nombreCli = id => (s.clientes.find(c => c.id === id) || {}).nombre || '';
+
+  /** Garantía por antigüedad de la instalación (no confundir con las
+      "garantías" que cuenta resumenEq, que son visitas de tipo garantía ya
+      hechas): esto es nomás "¿hace menos de un año que se instaló este
+      equipo?", para que salte a la vista en la tarjeta sin tener que ir a
+      mirar la fecha. */
+  const enGarantiaPorInstalacion = fechaInst => {
+    if (!fechaInst) return false;
+    const dias = Math.round((Date.now() - new Date(fechaInst + 'T12:00:00')) / 86400000);
+    return dias >= 0 && dias < 365;
+  };
   const coincide = (cli, f) => !f || sinAcentos([cli.nombre, cli.ciudad, cli.provincia, cli.direccion,
     cli.telefono, cli.correo, cli.cuit_dni,
     (equiposDe.get(cli.id) || []).map(e => `${e.n_serie} ${e.modelo}`).join(' ')].join(' ')).includes(f);
@@ -8390,6 +8713,8 @@ function BaseDeDatos() {
             ? bajarCSV('clientes', colsCli, clientes) : bajarCSV('equipos', colsEq, equipos)}>Exportar</button>
           ${editable && html`<button class="btn sec chico" onClick=${() => setEditEq({ nuevo: true })}>+ Equipo</button>`}
           ${editable && html`<button class="btn chico" onClick=${() => setEditCli({ nuevo: true })}>+ Cliente</button>`}
+          ${modo === 'equipos' && puedeAlta && html`<button class="btn sec chico"
+            onClick=${() => setImportando(true)}>Importar instalaciones</button>`}
           ${modo === 'equipos' && puedeAlta && html`<button class="btn chico" disabled=${!candidatosAlta.length}
             title=${candidatosAlta.length ? '' : 'No hay equipos nuevos para dar de alta'}
             onClick=${() => setConfirmando(true)}>
@@ -8467,30 +8792,33 @@ function BaseDeDatos() {
           const i = e.inst;
           const obs = i && (i.obs_instalaciones || i.obs_comercial || i.obs_produccion);
           const dir = e.direccion || (i && i.direccion_instalacion) || '';
+          const enGarantia = enGarantiaPorInstalacion(e.fecha_instalacion);
           return html`<div class="tarjeta-equipo" key=${e.id} onClick=${() => setEditEq(e)}>
             <div class="teq-cab">
               <span class="teq-serie">${e.n_serie}</span>
               <span class="et verde">En el sistema</span>
+              ${enGarantia && html`<span class="et alarma" title="Instalado hace menos de un año">En garantía</span>`}
             </div>
-            <div class="mini teq-sub">${[e.modelo, e.n_paradas && e.n_paradas + ' paradas',
-              (i && i.color), e.motorizacion].filter(Boolean).join(' · ') || 'Sin datos del equipo'}</div>
-            <div class="teq-datos">
-              <div><span class="rot">Cliente</span>${nombreCli(e.cliente_id) || 'sin cliente'}</div>
-              <div><span class="rot">Ciudad / Provincia</span>${[e.ciudad, e.provincia].filter(Boolean).join(' · ') || '—'}</div>
-            </div>
-            <div class="teq-dir" onClick=${ev => puedeAlta && ev.stopPropagation()}>
+            <div class="teq-campo"><span class="rot">Equipo</span><span class="val">
+              ${[e.modelo, e.n_paradas, (i && i.color), e.motorizacion]
+                .filter(Boolean).join(' · ') || '—'}</span></div>
+            <div class="teq-campo"><span class="rot">Cliente</span><span class="val">${nombreCli(e.cliente_id) || 'sin cliente'}</span></div>
+            <div class="teq-campo"><span class="rot">Ciudad / Provincia</span><span class="val">
+              ${[e.ciudad, e.provincia].filter(Boolean).join(' · ') || '—'}</span></div>
+            <div class="teq-campo" onClick=${ev => puedeAlta && ev.stopPropagation()}>
               <span class="rot">Dirección de instalación</span>
               ${puedeAlta
-                ? html`<${CampoGrilla} valor=${dir} ancho=${260}
+                ? html`<${CampoGrilla} valor=${dir} ancho=${220}
                     titulo="Dirección de instalación" placeholder="Sin cargar…"
                     onGuardar=${v => guardarDireccionEquipo(e, v)} />`
-                : html`<span title=${dir}>${dir || '—'}</span>`}
+                : html`<span class="val" title=${dir}>${dir || '—'}</span>`}
             </div>
-            ${((i && i.vendedor) || (i && i.instaladores)) && html`<div class="mini">
-              ${i.vendedor ? 'Vendedor: ' + i.vendedor : ''}${i.vendedor && i.instaladores ? ' · ' : ''}
-              ${i.instaladores ? 'Instaladores: ' + i.instaladores : ''}</div>`}
+            ${((i && i.vendedor) || (i && i.instaladores)) && html`<div class="teq-campo">
+              <span class="rot">Vendedor / Instaladores</span><span class="val">
+              ${[i.vendedor, i.instaladores].filter(Boolean).join(' · ')}</span></div>`}
+            <div class="teq-campo"><span class="rot">Instalación</span><span class="val">
+              ${e.fecha_instalacion ? fecha(e.fecha_instalacion, 1) : '—'}</span></div>
             <div class="teq-pie">
-              <span class="mini">${e.fecha_instalacion ? 'Instalado ' + fecha(e.fecha_instalacion, 1) : ''}</span>
               <span class="mini">
                 ${puedeComercial ? (r.n || 0) + ' atenc. · ' : ''}${r.garantias || 0} en garantía
                 · ${r.horas ? Math.round(r.horas) : 0} h acum.${puedeComercial && r.ultimo ? ' · últ. ' + fecha(r.ultimo, 1) : ''}</span>
@@ -8501,31 +8829,32 @@ function BaseDeDatos() {
         })}
         ${nuevosFiltrados.map(c => {
           const obsC = c.obs_instalaciones || c.obs_comercial || c.obs_produccion;
+          const enGarantia = enGarantiaPorInstalacion(c.fecha_instalacion);
           return html`<div class="tarjeta-equipo nuevo" key=${'n' + c.cod} title="Todavía no está dado de alta">
             <div class="teq-cab">
               <span class="teq-serie">${c.codigo}</span>
               <span class="et ambar">Nuevo</span>
+              ${enGarantia && html`<span class="et alarma" title="Instalado hace menos de un año">En garantía</span>`}
             </div>
-            <div class="mini teq-sub">${[c.modelo, c.niveles && c.niveles + ' paradas',
-              c.color, c.motorizacion].filter(Boolean).join(' · ') || 'Sin datos del equipo'}</div>
-            <div class="teq-datos">
-              <div><span class="rot">Cliente (sin dar de alta)</span>${c.nombre_cliente || '—'}</div>
-              <div><span class="rot">Ubicación de origen</span><span title=${c.ubicacion}>${c.ubicacion || '—'}</span></div>
-            </div>
-            <div class="teq-dir" onClick=${ev => puedeAlta && ev.stopPropagation()}>
+            <div class="teq-campo"><span class="rot">Equipo</span><span class="val">
+              ${[c.modelo, c.niveles, c.color, c.motorizacion]
+                .filter(Boolean).join(' · ') || '—'}</span></div>
+            <div class="teq-campo"><span class="rot">Cliente (sin dar de alta)</span><span class="val">${c.nombre_cliente || '—'}</span></div>
+            <div class="teq-campo"><span class="rot">Ubicación de origen</span><span class="val" title=${c.ubicacion}>${c.ubicacion || '—'}</span></div>
+            <div class="teq-campo" onClick=${ev => puedeAlta && ev.stopPropagation()}>
               <span class="rot">Dirección de instalación</span>
               ${puedeAlta
-                ? html`<${CampoGrilla} valor=${c.direccion_instalacion} ancho=${260}
+                ? html`<${CampoGrilla} valor=${c.direccion_instalacion} ancho=${220}
                     titulo="Dirección de instalación (se carga a mano)" placeholder="Sin cargar…"
                     onGuardar=${v => guardarDireccion(c, v)} />`
-                : html`<span title=${c.direccion_instalacion}>${c.direccion_instalacion || '—'}</span>`}
+                : html`<span class="val" title=${c.direccion_instalacion}>${c.direccion_instalacion || '—'}</span>`}
             </div>
-            ${(c.vendedor || c.instaladores) && html`<div class="mini">
-              ${c.vendedor ? 'Vendedor: ' + c.vendedor : ''}${c.vendedor && c.instaladores ? ' · ' : ''}
-              ${c.instaladores ? 'Instaladores: ' + c.instaladores : ''}</div>`}
+            ${(c.vendedor || c.instaladores) && html`<div class="teq-campo">
+              <span class="rot">Vendedor / Instaladores</span><span class="val">
+              ${[c.vendedor, c.instaladores].filter(Boolean).join(' · ')}</span></div>`}
+            <div class="teq-campo"><span class="rot">Instalación</span><span class="val">
+              ${c.fecha_instalacion ? fecha(c.fecha_instalacion, 1) : '—'}</span></div>
             <div class="teq-pie">
-              <span class="mini">${c.fecha_instalacion ? 'Instalado ' + fecha(c.fecha_instalacion, 1) : ''}</span>
-              <span></span>
               ${(puedeAlta || obsC) && html`<button class="btn sec chico" onClick=${() => setVerObs(c)}>
                 ${obsC ? 'Ver observaciones' : 'Cargar observaciones'}</button>`}
             </div>
@@ -8577,7 +8906,9 @@ function BaseDeDatos() {
                 <td class="num">${r.garantias || 0}</td>
                 <td class="num">${r.horas ? Math.round(r.horas) : ''}</td>
                 ${puedeComercial && html`<td>${fecha(r.ultimo)}</td>`}
-                <td><span class="et verde">Sí</span></td>
+                <td><span class="et verde">Sí</span>
+                  ${enGarantiaPorInstalacion(e.fecha_instalacion) && html`<span class="et alarma"
+                    title="Instalado hace menos de un año">En garantía</span>`}</td>
               </tr>`;
             })}
             ${nuevosFiltrados.map(c => html`<tr key=${'n' + c.cod} title="Todavía no está dado de alta">
@@ -8605,7 +8936,9 @@ function BaseDeDatos() {
               ${puedeComercial && html`<td class="num">—</td>`}
               <td class="num">—</td><td class="num">—</td>
               ${puedeComercial && html`<td>—</td>`}
-              <td><span class="et ambar">Nuevo</span></td>
+              <td><span class="et ambar">Nuevo</span>
+                ${enGarantiaPorInstalacion(c.fecha_instalacion) && html`<span class="et alarma"
+                  title="Instalado hace menos de un año">En garantía</span>`}</td>
             </tr>`)}
           </tbody>
         </table>
@@ -8620,6 +8953,7 @@ function BaseDeDatos() {
     ${verDup && html`<${Duplicados} alCerrar=${() => setVerDup(false)} />`}
 
     ${verObs && html`<${VerObs} inst=${verObs} alCerrar=${() => setVerObs(null)} />`}
+    ${importando && html`<${ImportarInstalaciones} alCerrar=${() => setImportando(false)} />`}
 
     ${confirmando && html`<${Modal} titulo="Dar de alta equipos nuevos" alCerrar=${() => !procesando && setConfirmando(false)} ancho=${560}>
       <p>Se van a crear ${nuevosFiltrados.length} equipos${' '}
@@ -8924,6 +9258,141 @@ function VerObs({ inst, alCerrar }) {
     <div class="fila" style="justify-content:flex-end;margin-top:10px">
       <button class="btn sec" onClick=${alCerrar}>Cerrar</button>
       ${editable && html`<button class="btn" onClick=${guardar}>Guardar</button>`}
+    </div>
+  <//>`;
+}
+
+/* El tamaño de cada tanda al insertar: no manda las 600 y pico filas de
+   una sola vez (el pedido se haría enorme), las parte en lotes. */
+const LOTE_IMPORTAR = 200;
+
+/** Importar instalaciones desde el registro en Excel (.xlsx) que arma
+    Augusto a mano -- el mismo archivo de siempre, que va creciendo con
+    cada instalación nueva. Lee el archivo en el navegador (sin mandarlo a
+    ningún lado) con leerRegistroInstalaciones() (app/15_xlsx.js), deja
+    elegir un período para quedarse sólo con lo nuevo, y antes de cargar
+    nada avisa cuánto de eso ya está en la base (mismo código + misma
+    fecha de instalación = ya cargado; una reinstalación real tiene fecha
+    distinta, así que no se confunde con un duplicado).
+
+    Lo que se carga va a la tabla instalaciones -- NO directo a equipos --
+    para que pase por el mismo camino de siempre: "Sólo nuevos" y "Dar de
+    alta equipos nuevos", en esta misma pantalla. */
+function ImportarInstalaciones({ alCerrar }) {
+  const s = useS();
+  const [archivo, setArchivo] = useState(null);
+  const [leyendo, setLeyendo] = useState(false);
+  const [error, setError] = useState(null);
+  const [filas, setFilas] = useState(null);
+  const [desde, setDesde] = useState('');
+  const [hasta, setHasta] = useState('');
+  const [subiendo, setSubiendo] = useState(false);
+  const [resultado, setResultado] = useState(null);
+
+  async function elegirArchivo(e) {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    setArchivo(f); setFilas(null); setError(null); setResultado(null); setLeyendo(true);
+    try {
+      const buf = new Uint8Array(await f.arrayBuffer());
+      setFilas(await leerRegistroInstalaciones(buf));
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setLeyendo(false);
+    }
+  }
+
+  const enRango = useMemo(() => (filas || []).filter(f =>
+    (!desde || !f.fecha_instalacion || f.fecha_instalacion >= desde)
+    && (!hasta || !f.fecha_instalacion || f.fecha_instalacion <= hasta)), [filas, desde, hasta]);
+
+  /* Ya cargada = mismo código (normalizado como en toda la pantalla) y
+     misma fecha de instalación, ya sea en la base o repetida dentro del
+     propio archivo que se está por cargar. */
+  const { nuevas, repetidas } = useMemo(() => {
+    const existentes = new Set(s.instalaciones.map(i => normCodigo(i.codigo) + '|' + (i.fecha_instalacion || '')));
+    const nuevas = [], repetidas = [];
+    for (const f of enRango) {
+      const clave = normCodigo(f.codigo) + '|' + (f.fecha_instalacion || '');
+      if (existentes.has(clave)) { repetidas.push(f); continue; }
+      existentes.add(clave); // también pisa duplicados repetidos dentro del mismo archivo
+      nuevas.push(f);
+    }
+    return { nuevas, repetidas };
+  }, [enRango, s.instalaciones]);
+
+  async function confirmar() {
+    setSubiendo(true);
+    let creadas = 0;
+    const erroresCarga = [];
+    const filasCreadas = [];
+    for (let i = 0; i < nuevas.length; i += LOTE_IMPORTAR) {
+      const lote = nuevas.slice(i, i + LOTE_IMPORTAR);
+      const { data, error: errLote } = await cliente().from('instalaciones').insert(lote).select('*');
+      if (errLote) { erroresCarga.push(errLote.message); continue; }
+      creadas += (data || []).length;
+      filasCreadas.push(...(data || []));
+    }
+    if (filasCreadas.length) set({ instalaciones: [...S.instalaciones, ...filasCreadas] });
+    setSubiendo(false);
+    setResultado({ creadas, errores: erroresCarga });
+    if (erroresCarga.length) toast(`Se cargaron ${creadas}, pero hubo errores: ${erroresCarga[0]}`, 'error');
+    else toast(`${creadas} instalaciones cargadas. Van a aparecer como equipos nuevos en "Por equipo".`, 'ok');
+  }
+
+  return html`<${Modal} titulo="Importar instalaciones desde Excel" alCerrar=${alCerrar} ancho=${640}>
+    <p class="mini">Elegí el archivo del registro de instalaciones (.xlsx). Se lee acá mismo, en tu
+      navegador: no se manda a ningún lado hasta que confirmes la carga. Lo que se carga queda en el
+      registro de instalaciones, igual que siempre, y de ahí pasa a "Sólo nuevos" para darlo de alta
+      cuando quieras.</p>
+
+    <div class="rejilla">
+      <${Campo} rot="Archivo (.xlsx)">
+        <input type="file" accept=".xlsx" disabled=${leyendo || subiendo} onChange=${elegirArchivo} />
+      <//>
+    </div>
+
+    ${leyendo && html`<p class="mini">Leyendo el archivo…</p>`}
+    ${error && html`<p class="mini" style="color:var(--error)">No se pudo leer: ${error}</p>`}
+
+    ${filas && !error && html`<div>
+      <div class="rejilla dos">
+        <${Txt} rot="Desde (opcional)" tipo="date" valor=${desde} alCambiar=${v => setDesde(v || '')} disabled=${subiendo} />
+        <${Txt} rot="Hasta (opcional)" tipo="date" valor=${hasta} alCambiar=${v => setHasta(v || '')} disabled=${subiendo} />
+      </div>
+      <div class="mini" style="margin:4px 0 10px">Dejá los dos vacíos para traer todo el archivo, o cargá
+        sólo un período (por ejemplo, el mes) si el registro ya trae instalaciones más viejas que ya
+        están en el sistema.</div>
+
+      <${Resumen} items=${[
+        ['filas en el archivo', filas.length],
+        ['en el período elegido', enRango.length],
+        ['ya estaban cargadas', repetidas.length],
+        ['nuevas para cargar', nuevas.length],
+      ]} />
+
+      ${nuevas.length > 0 && html`<div class="tabla-caja" style="max-height:220px;margin-top:10px">
+        <table class="grilla">
+          <thead><tr><th>Código</th><th>Cliente</th><th>Fecha</th><th>Ciudad / Ubicación</th></tr></thead>
+          <tbody>
+            ${nuevas.slice(0, 300).map((f, idx) => html`<tr key=${idx}>
+              <td><b>${f.codigo}</b></td><td>${f.nombre_cliente || ''}</td>
+              <td>${fecha(f.fecha_instalacion, 1)}</td><td>${f.ubicacion || ''}</td>
+            </tr>`)}
+          </tbody>
+        </table>
+      </div>`}
+    </div>`}
+
+    ${resultado && html`<p class="mini" style="margin-top:10px">
+      ${resultado.creadas} instalaciones cargadas.
+      ${resultado.errores.length ? html` Hubo errores: ${resultado.errores.join(' · ')}` : ''}</p>`}
+
+    <div class="fila" style="justify-content:flex-end;margin-top:14px">
+      <button class="btn sec" onClick=${alCerrar} disabled=${subiendo}>Cerrar</button>
+      ${filas && !resultado && html`<button class="btn" disabled=${!nuevas.length || subiendo}
+        onClick=${confirmar}>${subiendo ? 'Cargando…' : `Cargar ${nuevas.length} instalaciones nuevas`}</button>`}
     </div>
   <//>`;
 }
