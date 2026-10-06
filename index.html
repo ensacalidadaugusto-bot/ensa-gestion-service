@@ -710,17 +710,15 @@ table.grilla.prod .volver{padding:1px 5px;font-size:11px;line-height:1.3;margin-
   vertical-align:middle}
 table.grilla.prod input.celda.amano{font-weight:700;
   box-shadow:inset 0 -2px 0 color-mix(in srgb, var(--alerta) 60%, transparent)}
-/* Las dos columnas de texto se ven como una sola celda alta: sin rayas entre
-   filas, con el texto en el medio. (No se usa rowspan: una celda que abarca
-   todas las filas no se puede partir entre hojas al imprimir.) */
+/* Las dos columnas de texto del mes (no son datos de la fila sino del
+   técnico entero) repiten el mismo valor en cada renglón -- antes se
+   mostraban una sola vez, centradas a la mitad de la planilla como una
+   celda combinada de Excel, pero al imprimirse en más de una hoja esa fila
+   del medio podía quedar en una página distinta, dejando la columna vacía
+   en el resto. Ahora son una columna más, con su raya y su franja como
+   cualquier otra. */
 table.grilla.prod td.texto-prod{white-space:pre-wrap;font-size:10.5px;color:var(--suave);
-  min-width:130px;vertical-align:middle;text-align:center;
-  border-left:1px solid var(--borde);border-bottom:0;background:var(--papel)}
-table.grilla.prod td.texto-prod.ultima{border-bottom:1px solid var(--borde)}
-/* Ni las filas grises ni las rojas la pintan: es una columna aparte, no parte
-   de la fila. Va con !important porque la marca de fila combinada (gris + roja)
-   es más específica que cualquier selector razonable de esta columna. */
-table.grilla.prod td.texto-prod{background:var(--papel)!important}
+  min-width:130px;border-left:1px solid var(--borde)}
 /* el desglose por semana, arriba de la planilla */
 .semanas-prod{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 6px}
 .semanas-prod .sem{border:1px solid var(--borde);border-radius:8px;padding:6px 11px;
@@ -1650,6 +1648,32 @@ const ETIQUETAS_CONDICION_MONTO = {
   '+IVA': '+ IVA (solicitar datos al cliente)',
   'EFECTIVO': 'Cliente abona en efectivo',
 };
+
+/* ---------------------------------------------------------------------
+   CATEGORÍA LABORAL DEL TÉCNICO (sql/42_categoria_trabajador_productividad.sql)
+   De acá sale qué cuadro de valores de Productividad le corresponde a cada
+   técnico (ver app/66_productividad.js y app/90_admin.js, donde se asigna).
+   Un técnico sin categoría asignada usa el cuadro "sin categoría" -- el
+   mismo cuadro único que ya existía antes de esta separación -- así los
+   meses viejos, cargados antes de que existiera esta distinción, se
+   siguen viendo igual que siempre.
+   --------------------------------------------------------------------- */
+const CATEGORIAS_TRABAJADOR = [
+  { id: 'oficial_especializado', rot: 'Oficial Especializado' },
+  { id: 'operador', rot: 'Operador' },
+];
+const rotCategoriaTrabajador = id =>
+  CATEGORIAS_TRABAJADOR.find(c => c.id === id)?.rot || 'Sin categoría';
+/* El cuadro "sin categoría" se guarda con esta marca de texto, nunca con
+   NULL: para Postgres dos filas con NULL en una misma columna no son
+   "iguales", así que un NULL en categoria_trabajador rompería el upsert
+   por (periodo,categoria,tramo,categoria_trabajador) -- cada "Guardar"
+   crearía una fila nueva en vez de actualizar la que ya estaba. Los
+   valores viejos, cargados antes de que existiera esta columna, sí tienen
+   NULL ahí (no se tocan retroactivamente): por eso la lectura (valorDe/
+   valorMinuto en app/66_productividad.js) prueba primero esta marca y
+   recién si no encuentra nada cae a NULL. */
+const SIN_CATEGORIA_TRABAJADOR = 'sin_categoria';
 
 /* =====================================================================
    ACCESO A DATOS
@@ -6942,19 +6966,19 @@ function periodoDe(t) {
    --------------------------------------------------------------------- */
 async function traerProductividad(periodo) {
   const db = cliente();
-  const [valores, categorias, items, textos, config] = await Promise.all([
+  const [valores, categorias, items, textos, configs] = await Promise.all([
     db.from('productividad_valores').select('*').eq('periodo', periodo),
     db.from('productividad_categorias').select('*'),
     db.from('productividad_items').select('*').eq('periodo', periodo),
     db.from('productividad_tecnico').select('*').eq('periodo', periodo),
-    db.from('productividad_config').select('*').eq('periodo', periodo).maybeSingle(),
+    db.from('productividad_config').select('*').eq('periodo', periodo),
   ]);
-  const err = [valores, categorias, items, textos, config].find(r => r.error);
+  const err = [valores, categorias, items, textos, configs].find(r => r.error);
   if (err) throw new Error(err.error.message);
   return {
     valores: valores.data || [], categorias: categorias.data || [],
     items: items.data || [], textos: textos.data || [],
-    valorMinuto: Number(config.data?.valor_minuto || 0),
+    configs: configs.data || [],
   };
 }
 
@@ -6976,7 +7000,7 @@ function Productividad() {
     setError(null);
     try { setDatos(await traerProductividad(periodo)); }
     catch (e) {
-      setDatos({ valores: [], categorias: [], items: [], textos: [], valorMinuto: 0 });
+      setDatos({ valores: [], categorias: [], items: [], textos: [], configs: [] });
       setError(/relation|does not exist|no existe/i.test(e.message || '')
         ? 'Falta correr en Supabase el script 15_productividad.sql.'
         : (e.message || String(e)));
@@ -7081,12 +7105,34 @@ function Productividad() {
     return Math.max(1, dias.filter(x => x <= d).length);
   }, [semanaDelTecnico, tecActual, hoy]);
 
-  const valorMinuto = Number(datos?.valorMinuto || 0);
+  /* Categoría laboral del técnico elegido (sql/42_categoria_trabajador_
+     productividad.sql): de acá sale qué cuadro de valores le corresponde.
+     Se busca en tres pasos: (1) el cuadro de su categoría; (2) si no tiene
+     categoría asignada, o no se encontró nada para la suya, el cuadro
+     "Sin categoría" -- el que se carga a propósito desde "Valores del
+     mes"; (3) recién si tampoco hay nada ahí, las filas viejas con
+     categoria_trabajador en NULL, de antes de que existiera esta columna.
+     Así los meses ya liquidados se siguen viendo igual que siempre, sin
+     tener que volver a cargarlos. */
+  const catTrab = tecnico?.categoria_laboral || null;
+
+  const valorMinuto = useMemo(() => {
+    const buscar = ct => (datos?.configs || []).find(x => x.categoria_trabajador === ct);
+    const v = (catTrab && buscar(catTrab))
+      || buscar(SIN_CATEGORIA_TRABAJADOR)
+      || (datos?.configs || []).find(x => x.categoria_trabajador == null);
+    return Number(v?.valor_minuto || 0);
+  }, [datos, catTrab]);
 
   const valorDe = useCallback((categoria, tramo) => {
-    const v = (datos?.valores || []).find(x => x.categoria === categoria && x.tramo === tramo);
+    const buscar = ct => (datos?.valores || []).find(x =>
+      x.categoria === categoria && x.tramo === tramo && x.categoria_trabajador === ct);
+    const v = (catTrab && buscar(catTrab))
+      || buscar(SIN_CATEGORIA_TRABAJADOR)
+      || (datos?.valores || []).find(x =>
+        x.categoria === categoria && x.tramo === tramo && x.categoria_trabajador == null);
     return v ? Number(v.valor) : 0;
-  }, [datos]);
+  }, [datos, catTrab]);
 
   const itemDe = useCallback(id => (datos?.items || [])
     .find(x => String(x.trabajo_id) === String(id) && String(x.tecnico_id) === String(tecActual)),
@@ -7127,11 +7173,12 @@ function Productividad() {
     }), [delMes, tecActual, itemDe, catDe, valorDe, valorMinuto, servicesDeLaSemana,
          numeroEnLaSemana, hoy]);
 
-  /* Las dos últimas columnas son una sola celda alta: no llevan rayas entre
-     filas y el texto va en el medio, como una celda combinada de Excel. No se
-     usa rowspan porque una celda que abarca 31 filas no se puede partir entre
-     hojas y la planilla no se imprimiría. */
-  const medio = Math.floor(Math.max(0, filas.length - 1) / 2);
+  /* Las dos últimas columnas repiten el mismo texto en cada fila (antes se
+     mostraba una sola vez, centrado a la mitad de la planilla como una
+     celda combinada de Excel, pero al imprimirse en más de una hoja esa
+     fila del medio podía quedar en una página distinta de la que se
+     estaba mirando, dejando la columna vacía en el resto: por eso ahora
+     ocupan todas las filas). */
 
   /* el desglose por semana: es lo que explica por qué dos filas del mismo mes
      pueden pagarse distinto */
@@ -7260,6 +7307,10 @@ function Productividad() {
             onChange=${e => setTecnicoId(Number(e.target.value))}>
             ${tecnicos.map(t => html`<option value=${t.id}>${t.nombre}</option>`)}
           </select></label>
+        ${tecnico && (catTrab
+          ? html`<span class="et azul" title="De acá sale el cuadro de valores que se le aplica">
+              ${rotCategoriaTrabajador(catTrab)}</span>`
+          : html`<span class="et ambar" title="No tiene categoría laboral asignada (Admin → Técnicos): se le aplica el cuadro 'sin categoría' del mes, si lo hay.">Sin categoría laboral</span>`)}
         <div class="fila" style="margin-left:auto">
           <button class="btn sec chico" onClick=${() => setVerCuadro(true)}>Valores del mes</button>
           <button class="btn sec chico" onClick=${exportar}>Exportar</button>
@@ -7352,10 +7403,8 @@ function Productividad() {
                 title=${`Corregido a mano. Volver al valor calculado (${plata(f.sugerido)}).`}
                 onClick=${() => volverAlCuadro(f.t.id)}>↺</button>`}
               <span class="solo-impresion">${plata(f.pago)}</span></td>
-            <td class=${'texto-prod' + (i === filas.length - 1 ? ' ultima' : '')}
-              >${i === medio ? texto.semana_planta : ''}</td>
-            <td class=${'texto-prod' + (i === filas.length - 1 ? ' ultima' : '')}
-              >${i === medio ? texto.bono_garantias : ''}</td>
+            <td class="texto-prod">${texto.semana_planta}</td>
+            <td class="texto-prod">${texto.bono_garantias}</td>
           </tr>`)}
         </tbody>
         <tfoot>
@@ -7384,12 +7433,34 @@ function Productividad() {
    para no tener que escribir los doce números de nuevo.
    ===================================================================== */
 function CuadroValores({ periodo, datos, alCerrar, alGuardar }) {
-  const [minuto, setMinuto] = useState(() => String(datos.valorMinuto || ''));
+  /* Un juego de valores -- minuto y cuadro de tramos -- por cada categoría
+     laboral (sql/42_categoria_trabajador_productividad.sql), más uno
+     "Sin categoría" para los técnicos que todavía no tienen una asignada
+     en Admin → Técnicos y para no perder de vista los meses viejos, de
+     antes de que existiera esta separación.
+     Lo que se GUARDA en categoria_trabajador nunca es NULL, siempre
+     SIN_CATEGORIA_TRABAJADOR: para Postgres dos filas con NULL ahí no son
+     "iguales", así que guardar con NULL rompería el upsert (cada
+     "Guardar" crearía una fila nueva en vez de actualizar la que ya
+     estaba). claveCat() es sólo para INTERPRETAR lo que se lee: los
+     valores viejos, de antes de esta columna, sí tienen NULL. */
+  const CATS_CUADRO = [...CATEGORIAS_TRABAJADOR, { id: SIN_CATEGORIA_TRABAJADOR, rot: 'Sin categoría' }];
+  const claveCat = id => (id === null || id === undefined) ? SIN_CATEGORIA_TRABAJADOR : id;
+
+  const [minutos, setMinutos] = useState(() => {
+    const m = {};
+    for (const cc of CATS_CUADRO) {
+      const v = datos.configs.find(x => claveCat(x.categoria_trabajador) === cc.id);
+      m[cc.id] = v ? String(v.valor_minuto) : '';
+    }
+    return m;
+  });
   const [vals, setVals] = useState(() => {
     const m = {};
-    for (const c of PROD_CATEGORIAS) for (const t of PROD_TRAMOS) {
-      const v = datos.valores.find(x => x.categoria === c.id && x.tramo === t.id);
-      m[c.id + '|' + t.id] = v ? String(v.valor) : '';
+    for (const cc of CATS_CUADRO) for (const c of PROD_CATEGORIAS) for (const t of PROD_TRAMOS) {
+      const v = datos.valores.find(x => x.categoria === c.id && x.tramo === t.id
+        && claveCat(x.categoria_trabajador) === cc.id);
+      m[cc.id + '|' + c.id + '|' + t.id] = v ? String(v.valor) : '';
     }
     return m;
   });
@@ -7408,14 +7479,21 @@ function CuadroValores({ periodo, datos, alCerrar, alGuardar }) {
     const ant = mesAnterior();
     const [{ data, error }, cfg] = await Promise.all([
       cliente().from('productividad_valores').select('*').eq('periodo', ant),
-      cliente().from('productividad_config').select('*').eq('periodo', ant).maybeSingle(),
+      cliente().from('productividad_config').select('*').eq('periodo', ant),
     ]);
     if (error) return toast('No se pudo leer el mes anterior: ' + error.message, 'error');
-    if (!data || !data.length) return toast('El mes anterior no tiene valores cargados', 'error');
-    const m = { ...vals };
-    for (const v of data) m[v.categoria + '|' + v.tramo] = String(v.valor);
-    setVals(m);
-    if (cfg.data && cfg.data.valor_minuto) setMinuto(String(cfg.data.valor_minuto));
+    if ((!data || !data.length) && (!cfg.data || !cfg.data.length))
+      return toast('El mes anterior no tiene valores cargados', 'error');
+    if (data && data.length) {
+      const m = { ...vals };
+      for (const v of data) m[claveCat(v.categoria_trabajador) + '|' + v.categoria + '|' + v.tramo] = String(v.valor);
+      setVals(m);
+    }
+    if (cfg.data && cfg.data.length) {
+      const m = { ...minutos };
+      for (const c of cfg.data) m[claveCat(c.categoria_trabajador)] = String(c.valor_minuto);
+      setMinutos(m);
+    }
     toast(`Se trajeron los valores de ${ant}. Revisalos y guardá.`);
   }
 
@@ -7423,16 +7501,18 @@ function CuadroValores({ periodo, datos, alCerrar, alGuardar }) {
     setGuardando(true);
     try {
       const filas = [];
-      for (const c of PROD_CATEGORIAS) for (const t of PROD_TRAMOS) {
-        const v = vals[c.id + '|' + t.id];
-        filas.push({ periodo, categoria: c.id, tramo: t.id, valor: v === '' ? 0 : Number(v) });
+      for (const cc of CATS_CUADRO) for (const c of PROD_CATEGORIAS) for (const t of PROD_TRAMOS) {
+        const v = vals[cc.id + '|' + c.id + '|' + t.id];
+        filas.push({ periodo, categoria: c.id, tramo: t.id, categoria_trabajador: cc.id,
+          valor: v === '' ? 0 : Number(v) });
       }
       const r1 = await cliente().from('productividad_valores')
-        .upsert(filas, { onConflict: 'periodo,categoria,tramo' });
+        .upsert(filas, { onConflict: 'periodo,categoria,tramo,categoria_trabajador' });
       if (r1.error) throw new Error(r1.error.message);
+      const configs = CATS_CUADRO.map(cc => ({ periodo, categoria_trabajador: cc.id,
+        valor_minuto: minutos[cc.id] === '' ? 0 : Number(minutos[cc.id]) }));
       const rc = await cliente().from('productividad_config')
-        .upsert({ periodo, valor_minuto: minuto === '' ? 0 : Number(minuto) },
-          { onConflict: 'periodo' });
+        .upsert(configs, { onConflict: 'periodo,categoria_trabajador' });
       if (rc.error) throw new Error(rc.error.message);
       const r2 = await cliente().from('productividad_categorias')
         .upsert(Object.entries(cats).map(([tipo_pedido, categoria]) => ({ tipo_pedido, categoria })),
@@ -7445,42 +7525,51 @@ function CuadroValores({ periodo, datos, alCerrar, alGuardar }) {
     setGuardando(false);
   }
 
-  return html`<${Modal} titulo=${`Valores de productividad · ${periodo}`} alCerrar=${alCerrar} ancho=${760}>
+  return html`<${Modal} titulo=${`Valores de productividad · ${periodo}`} alCerrar=${alCerrar} ancho=${820}>
     <p class="mini">Cuánto se paga cada trabajo según cuántos ${' '}
-      <b>services y services proactivos</b>${' '} hizo el técnico ese mes. Es el cuadro que actualizás vos todos los meses.</p>
-    <div class="aviso">
-      <label class="fila" style="gap:8px;align-items:center">
-        <b>Valor del minuto</b>
-        <input type="number" step="0.01" style="width:130px;text-align:right" value=${minuto}
-          onInput=${e => setMinuto(e.target.value)} />
-        <span class="mini">${minuto && Number(minuto) > 0
-          ? `= ${plata(Number(minuto) * 60)} la hora` : ''}</span>
-      </label>
-      <div class="mini" style="margin-top:6px">
-        Los <b>services y services proactivos</b> se pagan al valor fijo del tramo,
-        y el tramo es <b>escalonado dentro de cada semana</b>: los tres primeros de
-        la semana al valor de 1 a 3, el cuarto, quinto y sexto al de 4 a 6, el
-        séptimo y el octavo al de 7 a 8, y del noveno en adelante al de 9 o más.
-        Todo lo demás —garantías, asistencias técnicas, relevamientos— se paga${' '}
-        <b>por minuto trabajado</b>, y los números del cuadro de abajo son el${' '}
-        <b>tope</b>: por más minutos que lleve, no se paga más que eso.</div>
-    </div>
-    <div class="tabla-caja" style="max-height:none;margin-bottom:12px">
-      <table class="grilla">
-        <thead><tr><th style="min-width:210px">Categoría</th>
-          ${PROD_TRAMOS.map(t => html`<th class="der">${t.rot}</th>`)}</tr></thead>
-        <tbody>
-          ${PROD_CATEGORIAS.filter(c => c.id !== 'sin_pago').map(c => html`<tr key=${c.id}>
-            <td><b>${c.rot}</b></td>
-            ${PROD_TRAMOS.map(t => html`<td class="num">
-              <input type="number" step="1" style="width:110px;text-align:right"
-                value=${vals[c.id + '|' + t.id]}
-                onInput=${e => setVals(v => ({ ...v, [c.id + '|' + t.id]: e.target.value }))} />
-            </td>`)}
-          </tr>`)}
-        </tbody>
-      </table>
-    </div>
+      <b>services y services proactivos</b>${' '} hizo el técnico ese mes, según su categoría laboral.
+      Es el cuadro que actualizás vos todos los meses.</p>
+    <div class="mini" style="margin-bottom:10px">
+      Los <b>services y services proactivos</b> se pagan al valor fijo del tramo,
+      y el tramo es <b>escalonado dentro de cada semana</b>: los tres primeros de
+      la semana al valor de 1 a 3, el cuarto, quinto y sexto al de 4 a 6, el
+      séptimo y el octavo al de 7 a 8, y del noveno en adelante al de 9 o más.
+      Todo lo demás —garantías, asistencias técnicas, relevamientos— se paga${' '}
+      <b>por minuto trabajado</b>, y los números del cuadro de abajo son el${' '}
+      <b>tope</b>: por más minutos que lleve, no se paga más que eso.</div>
+
+    ${CATS_CUADRO.map(cc => html`<fieldset key=${cc.id} style="margin-bottom:14px">
+      <legend>${cc.rot}</legend>
+      ${cc.id === SIN_CATEGORIA_TRABAJADOR && html`<p class="mini" style="margin-top:0">Se usa para los
+        técnicos sin categoría asignada (Admin → Técnicos) y es el único cuadro que ven los meses
+        cargados antes de que existiera esta separación por categoría.</p>`}
+      <div class="aviso" style="margin-bottom:10px">
+        <label class="fila" style="gap:8px;align-items:center">
+          <b>Valor del minuto</b>
+          <input type="number" step="0.01" style="width:130px;text-align:right"
+            value=${minutos[cc.id]}
+            onInput=${e => setMinutos(m => ({ ...m, [cc.id]: e.target.value }))} />
+          <span class="mini">${minutos[cc.id] && Number(minutos[cc.id]) > 0
+            ? `= ${plata(Number(minutos[cc.id]) * 60)} la hora` : ''}</span>
+        </label>
+      </div>
+      <div class="tabla-caja" style="max-height:none">
+        <table class="grilla">
+          <thead><tr><th style="min-width:210px">Categoría</th>
+            ${PROD_TRAMOS.map(t => html`<th class="der">${t.rot}</th>`)}</tr></thead>
+          <tbody>
+            ${PROD_CATEGORIAS.filter(c => c.id !== 'sin_pago').map(c => html`<tr key=${c.id}>
+              <td><b>${c.rot}</b></td>
+              ${PROD_TRAMOS.map(t => html`<td class="num">
+                <input type="number" step="1" style="width:110px;text-align:right"
+                  value=${vals[cc.id + '|' + c.id + '|' + t.id]}
+                  onInput=${e => setVals(v => ({ ...v, [cc.id + '|' + c.id + '|' + t.id]: e.target.value }))} />
+              </td>`)}
+            </tr>`)}
+          </tbody>
+        </table>
+      </div>
+    </fieldset>`)}
 
     <details>
       <summary class="mini" style="cursor:pointer;margin-bottom:8px">
@@ -9560,6 +9649,15 @@ function Admin() {
     if (!r.ok) return toast(r.msg, 'error');
     set({ tecnicos: S.tecnicos.map(x => x.id === t.id ? { ...x, activo } : x) });
   }
+  /* Categoría laboral (sql/42_categoria_trabajador_productividad.sql): de
+     acá sale qué cuadro de valores le aplica en Productividad. Cambiarla
+     sólo afecta hacia adelante: lo ya pagado en meses anteriores no se
+     recalcula. */
+  async function cambiarCategoriaTecnico(t, categoria_laboral) {
+    const r = await actualizarYComprobar('tecnicos', t.id, { categoria_laboral: categoria_laboral || null });
+    if (!r.ok) return toast(r.msg, 'error');
+    set({ tecnicos: S.tecnicos.map(x => x.id === t.id ? { ...x, categoria_laboral } : x) });
+  }
   /* Borrar un técnico borra en cascada su asignación en trabajo_tecnicos: si
      tiene trabajos o giras en el historial, se pierde ese antecedente. Por
      eso se bloquea acá y se sugiere desactivarlo en su lugar. */
@@ -9713,6 +9811,7 @@ function Admin() {
         </div>`}
         <table class="grilla">
           <thead><tr><th style="width:62px">Activo</th><th>Técnico</th>
+            <th style="min-width:160px">Categoría laboral</th>
             <th class="der">Trabajos</th><th class="der">Cumplidos</th>
             <th class="der">Horas de trabajo</th><th class="der">Horas promedio</th>
             ${admin && html`<th></th>`}</tr></thead>
@@ -9721,6 +9820,12 @@ function Admin() {
               title=${r.activo ? 'Activo: aparece en las listas' : 'Inactivo: no aparece para asignar trabajos'}
               onChange=${e => activarTecnico(r, e.target.checked)} /></td>
             <td><b>${r.nombre}</b></td>
+            <td><select style="width:auto" disabled=${!puedePrecios()} value=${r.categoria_laboral || ''}
+                title="De acá sale qué cuadro de valores le aplica en Productividad"
+                onChange=${e => cambiarCategoriaTecnico(r, e.target.value || null)}>
+                <option value="">Sin definir</option>
+                ${CATEGORIAS_TRABAJADOR.map(c => html`<option value=${c.id}>${c.rot}</option>`)}
+              </select></td>
             <td class="num">${r.trabajos.toLocaleString('es-AR')}</td>
             <td class="num">${r.cumplidos.toLocaleString('es-AR')}</td>
             <td class="num">${r.horas.toLocaleString('es-AR', { maximumFractionDigits: 1 })}</td>
@@ -9731,6 +9836,7 @@ function Admin() {
           <tfoot><tr>
             <td></td>
             <td><b>Total</b></td>
+            <td></td>
             <td class="num"><b>${resumenTec.reduce((a, r) => a + r.trabajos, 0).toLocaleString('es-AR')}</b></td>
             <td class="num"><b>${resumenTec.reduce((a, r) => a + r.cumplidos, 0).toLocaleString('es-AR')}</b></td>
             <td class="num"><b>${resumenTec.reduce((a, r) => a + r.horas, 0)
