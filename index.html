@@ -287,6 +287,11 @@ table.grilla.registro{table-layout:fixed;width:100%;
   border-spacing:0 7px;background:var(--fondo)}
 table.grilla.registro th,table.grilla.registro td{white-space:normal;max-width:none;
   vertical-align:top;border-right:0}
+/* Toda la fila en mayúscula, columna por columna sin excepción: así se lee
+   parejo más allá de cómo haya quedado tipeado el dato (mayúscula, minúscula
+   o mezclado). Es sólo de presentación -- lo que se guarda en la base no
+   cambia -- y alcanza también a las etiquetas (prioridad, estado, cierre). */
+table.grilla.registro tbody td{text-transform:uppercase}
 
 /* ---- cada registro es una tarjeta ----
    Antes eran renglones pegados uno abajo del otro y había que seguirlos con
@@ -5337,7 +5342,21 @@ function tamañoRecomendado(paradas, columnas = COLS_HOJA) {
 function HojaRuta({ gira, paradas, alCerrar }) {
   const s = useS();
   const [corte, setCorte] = useState('');   // '' | dia | tecnico
-  const recomendado = useMemo(() => tamañoRecomendado(paradas), [paradas]);
+  /* Día a imprimir: '' = toda la semana, o una fecha puntual (o "Sin fecha")
+     para sacar sólo la hoja de ruta de ese día -- por ejemplo, para
+     entregarle al técnico nada más que lo de hoy. */
+  const [diaFiltro, setDiaFiltro] = useState('');
+  const diasConTrabajo = useMemo(() => [...new Set(paradas.map(t => t.fecha_visita || 'Sin fecha'))]
+    .sort((a, b) => a.localeCompare(b, 'es')), [paradas]);
+  const etiquetasDias = useMemo(() => {
+    const m = {};
+    diasConTrabajo.forEach(d => { m[d] = d === 'Sin fecha' ? 'Sin fecha asignada' : fechaLarga(d); });
+    return m;
+  }, [diasConTrabajo]);
+  const paradasDelDia = useMemo(() => diaFiltro
+    ? paradas.filter(t => (t.fecha_visita || 'Sin fecha') === diaFiltro)
+    : paradas, [paradas, diaFiltro]);
+  const recomendado = useMemo(() => tamañoRecomendado(paradasDelDia), [paradasDelDia]);
   const [tam, setTam] = useState(recomendado);   // tamaño de letra de la planilla
   const tec = s.tecnicos.find(t => t.id === gira.tecnico_id);
   const tec2 = s.tecnicos.find(t => t.id === gira.tecnico2_id);
@@ -5347,9 +5366,9 @@ function HojaRuta({ gira, paradas, alCerrar }) {
   }, []);
 
   const grupos = useMemo(() => {
-    if (!corte) return [[null, paradas]];
+    if (!corte) return [[null, paradasDelDia]];
     const m = new Map();
-    paradas.forEach(t => {
+    paradasDelDia.forEach(t => {
       const k = corte === 'dia'
         ? (t.fecha_visita || 'Sin fecha')
         : (t.tecnicos || 'Sin técnico asignado');
@@ -5357,16 +5376,16 @@ function HojaRuta({ gira, paradas, alCerrar }) {
       m.get(k).push(t);
     });
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'es'));
-  }, [paradas, corte]);
+  }, [paradasDelDia, corte]);
 
   /* A4 apaisado con 6 mm de margen ≈ 1075 px de ancho útil */
-  const anchos = useMemo(() => anchosPlanilla(COLS_HOJA, paradas, 1072, tam), [paradas, tam]);
+  const anchos = useMemo(() => anchosPlanilla(COLS_HOJA, paradasDelDia, 1072, tam), [paradasDelDia, tam]);
   /* Qué tan apretada queda la hoja con el tamaño elegido */
   const holgura = useMemo(() => {
-    const m = COLS_HOJA.map(([rot, val]) => medidasColumna(rot, paradas.map(f => val(f)), tam,
+    const m = COLS_HOJA.map(([rot, val]) => medidasColumna(rot, paradasDelDia.map(f => val(f)), tam,
       rot === 'OBSERVACIONES'));
     return 1072 - m.reduce((a, x) => a + x.minimo, 0);
-  }, [paradas, tam]);
+  }, [paradasDelDia, tam]);
 
   /* Cuando en una misma tabla conviven trabajos de más de un día ("Todo
      junto", o separando por técnico, que puede mezclar días de la semana),
@@ -5391,6 +5410,8 @@ function HojaRuta({ gira, paradas, alCerrar }) {
      de todo en pantalla) para que, al saltar de hoja física al imprimir, el
      navegador la vuelva a imprimir sola junto con los títulos de columna:
      es el mismo mecanismo por el que ya se repiten los títulos de columna. */
+  const subtituloDia = diaFiltro ? etiquetasDias[diaFiltro] : null;
+
   const filaTitulo = html`<tr class="fila-titulo-planilla">
     <th colspan=${COLS_HOJA.length}>
       <div class="encabezado-hoja">
@@ -5398,6 +5419,7 @@ function HojaRuta({ gira, paradas, alCerrar }) {
           <img class="logo-hoja" src=${LOGO_NEGRO} alt="ENSA" />
           <div class="titulo-hoja">${gira.n_semana || ''}-Semana en: ${gira.zona || ''}</div>
           <div class="mini">Semana del ${fecha(gira.fecha_desde, 1)}${gira.fecha_hasta ? ' al ' + fecha(gira.fecha_hasta, 1) : ''}</div>
+          ${subtituloDia && html`<div class="mini"><b>Día: ${subtituloDia}</b></div>`}
         </div>
         <div class="mini der">
           <div><b>Técnico${tec2 ? ' 1' : ''}:</b> ${tec ? tec.nombre : '—'}</div>
@@ -5413,7 +5435,10 @@ function HojaRuta({ gira, paradas, alCerrar }) {
   return html`<div class="fondo" style="justify-content:center;align-items:flex-start;padding:14px;overflow:auto">
     <div class="panel hoja-impresion" style="width:100%;max-width:1300px;background:var(--papel)">
       <div class="panel-cab no-imprimir">
-        <h2>Planilla de trabajos — semana ${gira.n_semana || ''}</h2>
+        <h2>Planilla de trabajos — semana ${gira.n_semana || ''}${subtituloDia ? ' · ' + subtituloDia : ''}</h2>
+        <${Sel} valor=${diaFiltro} opts=${diasConTrabajo} etiquetas=${etiquetasDias} vacio="Toda la semana"
+          alCambiar=${v => setDiaFiltro(v || '')} />
+        <span class="mini">día a imprimir</span>
         <${Sel} valor=${corte} opts=${['dia', 'tecnico']} vacio="Todo junto"
           alCambiar=${v => setCorte(v || '')} />
         <span class="mini">separar por…</span>
@@ -5435,6 +5460,7 @@ function HojaRuta({ gira, paradas, alCerrar }) {
             <img class="logo-hoja" src=${LOGO_NEGRO} alt="ENSA" />
             <div class="titulo-hoja">${gira.n_semana || ''}-Semana en: ${gira.zona || ''}</div>
             <div class="mini">Semana del ${fecha(gira.fecha_desde, 1)}${gira.fecha_hasta ? ' al ' + fecha(gira.fecha_hasta, 1) : ''}</div>
+            ${subtituloDia && html`<div class="mini"><b>Día: ${subtituloDia}</b></div>`}
           </div>
           <div class="mini der">
             <div><b>Técnico${tec2 ? ' 1' : ''}:</b> ${tec ? tec.nombre : '—'}</div>
@@ -5447,7 +5473,9 @@ function HojaRuta({ gira, paradas, alCerrar }) {
         <div class="mini no-imprimir" style="margin:-6px 0 10px">En la hoja impresa este
           encabezado se repite solo al principio de cada página, junto con los títulos de columna.</div>
 
-        ${grupos.map(([dia, lista]) => html`<div key=${dia || 'todo'} style="margin-bottom:14px">
+        ${!paradasDelDia.length ? html`<div class="vacio">
+          ${diaFiltro ? 'Ese día no tiene trabajos asignados en esta gira.' : 'Esta gira todavía no tiene trabajos asignados.'}
+        </div>` : grupos.map(([dia, lista]) => html`<div key=${dia || 'todo'} style="margin-bottom:14px">
           ${dia && html`<div class="titulo-dia">${corte === 'tecnico'
             ? dia
             : (dia === 'Sin fecha' ? 'Sin fecha asignada' : fechaLarga(dia))}</div>`}
@@ -5469,7 +5497,7 @@ function HojaRuta({ gira, paradas, alCerrar }) {
           </div>
         </div>`)}
 
-        ${paradas.some(recienInstalado) && html`<div class="mini" style="margin:2px 0 8px">
+        ${paradasDelDia.some(recienInstalado) && html`<div class="mini" style="margin:2px 0 8px">
           <span class="et rojo">■</span> Equipo instalado hace menos de un mes: revisar si corresponde garantía.
         </div>`}
         <div class="pie-hoja mini">
