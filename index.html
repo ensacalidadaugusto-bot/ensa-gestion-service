@@ -1122,6 +1122,21 @@ function usd(v) {
   if (v === null || v === undefined || v === '' || Number(v) === 0) return '';
   return 'U$D ' + Number(v).toLocaleString('es-AR', { maximumFractionDigits: 2 });
 }
+/** convierte un precio en dólares a pesos con la cotización vigente (config.cotizacion_usd) */
+function pesosDeUsd(valorUsd) { return (Number(valorUsd) || 0) * Number(S.config.cotizacion_usd || 0); }
+/** Actualiza sólo el número de la cotización del dólar (no toca el mes de
+    referencia) y lo deja asentado en el historial de cotizaciones, igual que
+    el editor completo del módulo Repuestos. Se usa ahí y también desde la
+    pestaña Cobranza de cada trabajo, para poder corregir un dólar atrasado
+    sin tener que salir de la ficha. */
+async function guardarCotizacionDolar(valorNuevo) {
+  const r = await actualizarYComprobar('config', 1,
+    { cotizacion_usd: valorNuevo, actualizado_en: new Date().toISOString() });
+  if (!r.ok) return r;
+  await cliente().from('cotizaciones').insert({ valor: valorNuevo, nota: S.config.mes_cotizacion || '' });
+  set({ config: { ...S.config, cotizacion_usd: valorNuevo } });
+  return r;
+}
 function sinAcentos(s) {
   return String(s == null ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
@@ -3794,6 +3809,14 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
   const [audit, setAudit] = useState(null);
   const [verHistorial, setVerHistorial] = useState(false);
   const [creando, setCreando] = useState(null);   // 'cliente' | 'equipo'
+  /* Pestaña Cobranza: refrescar el comentario interno y consultar/actualizar
+     el dólar de repuestos sin salir de la ficha (ver más abajo, junto al
+     resto de los campos de Cobranza). */
+  const [refrescandoComentario, setRefrescandoComentario] = useState(false);
+  const [repuestoElegidoId, setRepuestoElegidoId] = useState('');
+  const [cotNueva, setCotNueva] = useState(() => s.config.cotizacion_usd);
+  const [guardandoCotizacion, setGuardandoCotizacion] = useState(false);
+  useEffect(() => { setCotNueva(s.config.cotizacion_usd); }, [s.config.cotizacion_usd]);
   const editable = puedeEditar();          // puede guardar algo
   const edServ = puedeServicio();          // datos del servicio y planificación
   const edEstado = puedeEstadoVisita();    // estado y fecha de visita: además cobranza
@@ -3834,6 +3857,33 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
     } catch (e) {
       toast('No se pudo guardar: ' + e.message, 'error');
     }
+  }
+
+  /* El comentario interno se edita en la solapa Servicio y vive en "b", que
+     se saca de "original" una sola vez al abrir la ficha: si alguien más lo
+     cambió mientras esta ficha seguía abierta, acá no se entera solo.
+     Refrescar vuelve a leer el trabajo entero (se actualiza en S.trabajos, y
+     con eso "original" -- y lo que se muestra en Cobranza -- quedan al día)
+     sin tocar lo que esta persona esté escribiendo en la solapa Servicio. */
+  async function refrescarComentario() {
+    setRefrescandoComentario(true);
+    try { await refrescarTrabajo(id); toast('Comentario actualizado', 'ok'); }
+    catch (e) { toast('No se pudo refrescar: ' + (e.message || e), 'error'); }
+    setRefrescandoComentario(false);
+  }
+
+  /* Dólar de repuestos consultable y corregible sin salir de la ficha: usa
+     el mismo valor de config.cotizacion_usd que el módulo Repuestos, así que
+     cambiarlo acá lo cambia en todos lados por igual. */
+  async function actualizarCotizacionDolar() {
+    const limpio = String(cotNueva).replace(',', '.').trim();
+    const nueva = Number(limpio);
+    if (!limpio || !Number.isFinite(nueva) || nueva <= 0) return toast('Ingresá un valor de dólar válido', 'error');
+    setGuardandoCotizacion(true);
+    const r = await guardarCotizacionDolar(nueva);
+    setGuardandoCotizacion(false);
+    if (!r.ok) return toast(r.msg, 'error');
+    toast('Cotización del dólar actualizada: los precios de repuestos en pesos se recalculan solos', 'ok');
   }
 
   /* Los campos de Cobranza que se editan acá adentro (admin, oficina y
@@ -4201,6 +4251,58 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
                   <div class="mini">Acá se ve el estado administrativo del trabajo; se carga y se corrige
                     desde el módulo <b>Cobranza</b>, que es donde vive ese circuito.</div>
                 </div>`}
+          </div>
+
+          <div class="fila" style="gap:12px;flex-wrap:wrap;margin-bottom:10px;align-items:stretch">
+            <div class="aviso" style="flex:1;min-width:240px;margin-bottom:0">
+              <div class="fila" style="justify-content:space-between;align-items:center;gap:8px">
+                <b>Comentario interno (Servicio)</b>
+                <button class="btn sec chico" disabled=${refrescandoComentario} onClick=${refrescarComentario}
+                  title="Vuelve a leer este trabajo, por si se cargó o cambió el comentario desde que se abrió esta ficha">
+                  ${refrescandoComentario ? 'Refrescando…' : '↻ Refrescar'}</button>
+              </div>
+              <div class="mini" style="white-space:pre-wrap;margin-top:6px">
+                ${(original && original.comentarios) || '— sin comentarios cargados —'}</div>
+            </div>
+
+            <div class="aviso" style="flex:1;min-width:240px;margin-bottom:0">
+              <b>Precio de repuestos</b>
+              <select style="width:100%;margin-top:6px" value=${repuestoElegidoId}
+                onChange=${e => setRepuestoElegidoId(e.target.value)}>
+                <option value="">Elegir repuesto…</option>
+                ${s.repuestos.filter(r => r.activo !== false)
+                  .sort((x, y) => x.elemento.localeCompare(y.elemento, 'es'))
+                  .map(r => html`<option value=${r.id}>${r.elemento}</option>`)}
+              </select>
+              ${(() => {
+                const r = s.repuestos.find(x => String(x.id) === String(repuestoElegidoId));
+                if (!r) return '';
+                const conPrecio = MODELOS.filter(m => r['usd_' + m] != null && r['usd_' + m] !== '');
+                return html`<div class="mini" style="margin-top:6px">
+                  ${conPrecio.length
+                    ? conPrecio.map(m => html`<div key=${m}>Modelo ${m}:
+                        <b>${plata(Math.round(pesosDeUsd(r['usd_' + m])))}</b></div>`)
+                    : html`<div>Sin precio cargado para este repuesto.</div>`}
+                </div>`;
+              })()}
+              <div class="fila mini" style="gap:6px;align-items:center;margin-top:8px">
+                <span>Dólar:</span>
+                ${puedeCotizacion()
+                  ? html`<${Fragment}>
+                      <input type="number" style="width:100px" value=${cotNueva}
+                        onInput=${e => setCotNueva(e.target.value)} />
+                      <button class="btn sec chico" disabled=${guardandoCotizacion
+                          || Number(cotNueva) === Number(s.config.cotizacion_usd)}
+                        onClick=${actualizarCotizacionDolar}>
+                        ${guardandoCotizacion ? 'Guardando…' : 'Actualizar'}</button>
+                    <//>`
+                  : html`<b>$${Number(s.config.cotizacion_usd).toLocaleString('es-AR')}</b>`}
+              </div>
+              <div class="mini" style="margin-top:4px;opacity:.75">
+                Vigente: $${Number(s.config.cotizacion_usd).toLocaleString('es-AR')} por dólar
+                ${s.config.mes_cotizacion ? ` (${s.config.mes_cotizacion})` : ''}. Es el mismo valor
+                de toda la aplicación: cambiarlo acá lo cambia también en el módulo Repuestos.</div>
+            </div>
           </div>
 
           <fieldset><legend>Facturación</legend>
