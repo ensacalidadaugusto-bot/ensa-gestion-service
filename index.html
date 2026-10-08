@@ -684,6 +684,20 @@ body.esquina-ocupada .aviso-version{bottom:60px}
   border-radius:0 0 6px 6px;max-height:260px;overflow:auto;z-index:20;box-shadow:var(--sombra)}
 .sugerencias div{padding:6px 9px;cursor:pointer;font-size:12px}
 .sugerencias div:hover,.sugerencias div.act{background:var(--azul-claro)}
+/* Menú de gestión con el cliente (Hoja de ruta): checklist visual, en rojo,
+   de las gestiones a tener resueltas antes de la visita. Va con
+   position:fixed (coordenadas calculadas en JS al abrirlo) en lugar de
+   absolute, porque la fila vive dentro de cajas con scroll o esquinas
+   redondeadas recortadas (overflow:hidden, ver .dia) que lo cortarían. */
+.gestion-cli{display:inline-block}
+.capa-cierre-menu{position:fixed;inset:0;z-index:15;background:transparent}
+.menu-gestion-cli{position:fixed;z-index:20;
+  background:var(--papel);border:1px solid var(--borde);border-radius:8px;box-shadow:var(--sombra);
+  padding:6px;display:flex;flex-direction:column;gap:4px;min-width:200px}
+.menu-gestion-cli button{background:var(--et-rojo);color:var(--et-rojo-t);border:1px solid var(--et-rojo-t);
+  border-radius:5px;padding:5px 8px;font-size:11px;font-weight:700;text-align:left;cursor:pointer;
+  text-transform:uppercase;letter-spacing:.2px;white-space:nowrap}
+.menu-gestion-cli button:hover{background:var(--et-rojo-t);color:#fff}
 .linea-tiempo{border-left:2px solid var(--borde);margin-left:6px;padding-left:12px}
 .linea-tiempo .ev{margin-bottom:9px;position:relative;font-size:12px}
 .linea-tiempo .ev:before{content:"";position:absolute;left:-17px;top:5px;width:8px;height:8px;border-radius:50%;background:var(--acento)}
@@ -5069,6 +5083,15 @@ function LineaHistorial({ t, alAbrir }) {
 /* =====================================================================
    MÓDULO 2 — GIRA / HOJA DE RUTA SEMANAL
    ===================================================================== */
+/* Recordatorio visual para la oficina, al lado de cada trabajo ya
+   programado en la hoja de ruta: gestiones de contacto con el cliente que
+   conviene tener resueltas antes de la visita. Es sólo un checklist que se
+   despliega en pantalla -- no envía ningún mensaje, no cambia el estado del
+   trabajo ni guarda nada en la base -- para que no se pase por alto
+   confirmar, coordinar el horario, reprogramar o avisar al cliente antes
+   de salir a la gira. */
+const OPCIONES_GESTION_CLIENTE = ['CONFIRMAR TRABAJOS', 'COORDINAR HORARIO', 'REPROGRAMAR', 'DAR AVISO AL CLIENTE'];
+
 function Giras() {
   const s = useS();
   const [giraId, setGiraId] = useState(() => (s.giras[0] && s.giras[0].id) || null);
@@ -5078,6 +5101,11 @@ function Giras() {
   const [nueva, setNueva] = useState(false);
   const [fichaId, setFichaId] = useState(null);
   const [asignando, setAsignando] = useState(null);   // trabajo al que se le elige el día
+  /* Parada con el menú de gestión abierto: { id, top, left } en coordenadas
+     de pantalla (position:fixed), calculadas al abrir -- así el menú se ve
+     entero aunque la fila esté dentro de una caja con scroll o con las
+     esquinas redondeadas recortadas (overflow:hidden), como .dia. */
+  const [menuGestion, setMenuGestion] = useState(null);
   const editable = puedeGiras();
   const gira = s.giras.find(g => g.id === giraId);
   const paradas = useMemo(() => s.trabajos.filter(t => t.gira_id === giraId)
@@ -5290,9 +5318,24 @@ function Giras() {
                   ${t.cliente_telefono ? ' · ☎ ' + t.cliente_telefono : ''}</small>
                 ${t.obs_servicio && html`<small>${t.obs_servicio}</small>`}
               </div>
-              ${editable && html`<div class="fila" style="gap:4px">
+              ${editable && html`<div class="fila" style="gap:4px;align-items:flex-start">
                 <input type="date" style="width:130px" value=${t.fecha_visita || ''}
                   onChange=${e => moverDia(t, e.target.value)} />
+                <div class="gestion-cli">
+                  <button class="btn sec chico" title="Gestiones pendientes con el cliente para este trabajo"
+                    onClick=${e => {
+                      if (menuGestion && menuGestion.id === t.id) return setMenuGestion(null);
+                      const r = e.currentTarget.getBoundingClientRect();
+                      setMenuGestion({ id: t.id, top: r.bottom + 4, left: Math.max(8, r.right - 200) });
+                    }}>⚠</button>
+                  ${menuGestion && menuGestion.id === t.id && html`<${Fragment}>
+                    <div class="capa-cierre-menu" onClick=${() => setMenuGestion(null)}></div>
+                    <div class="menu-gestion-cli" style=${`top:${menuGestion.top}px;left:${menuGestion.left}px`}>
+                      ${OPCIONES_GESTION_CLIENTE.map(op => html`<button key=${op}
+                        onClick=${() => setMenuGestion(null)}>${op}</button>`)}
+                    </div>
+                  <//>`}
+                </div>
                 <button class="btn sec chico" title="Quitar de la gira" onClick=${() => quitar(t)}>✕</button>
               </div>`}
             </div>`)}
