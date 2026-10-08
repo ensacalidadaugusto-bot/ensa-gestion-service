@@ -646,6 +646,14 @@ table.calor .celda{display:flex;align-items:center;justify-content:center;min-wi
 .parada .info{flex:1;min-width:0}
 .parada .info b{display:block}
 .parada .info small{color:var(--suave);display:block;white-space:normal}
+/* Parada con una gestión con el cliente pendiente (cualquiera de las 4
+   opciones del checklist menos "CONFIRMAR TRABAJOS"): se pinta la tarjeta
+   entera, con un canto más marcado, para que salte a la vista */
+.parada.parada-pendiente-gestion{background:var(--et-rojo);box-shadow:inset 4px 0 0 0 var(--et-rojo-t)}
+.parada.parada-pendiente-gestion .info small{color:var(--et-rojo-t)}
+.gestion-cli-etq{font-weight:700;color:var(--et-rojo-t)!important}
+/* El botón ⚠ se enciende en rojo mientras haya una gestión pendiente */
+.gestion-cli button.activo{background:var(--et-rojo-t);color:#fff;border-color:var(--et-rojo-t)}
 .pendientes{max-height:62vh;overflow:auto}
 .pend{padding:7px 10px;border-bottom:1px solid var(--borde-suave);display:flex;gap:8px;align-items:center}
 .pend:hover{background:var(--hover)}
@@ -698,6 +706,7 @@ body.esquina-ocupada .aviso-version{bottom:60px}
   border-radius:5px;padding:5px 8px;font-size:11px;font-weight:700;text-align:left;cursor:pointer;
   text-transform:uppercase;letter-spacing:.2px;white-space:nowrap}
 .menu-gestion-cli button:hover{background:var(--et-rojo-t);color:#fff}
+.menu-gestion-cli button.act{background:var(--et-rojo-t);color:#fff;box-shadow:inset 0 0 0 2px var(--et-rojo)}
 .linea-tiempo{border-left:2px solid var(--borde);margin-left:6px;padding-left:12px}
 .linea-tiempo .ev{margin-bottom:9px;position:relative;font-size:12px}
 .linea-tiempo .ev:before{content:"";position:absolute;left:-17px;top:5px;width:8px;height:8px;border-radius:50%;background:var(--acento)}
@@ -5083,14 +5092,18 @@ function LineaHistorial({ t, alAbrir }) {
 /* =====================================================================
    MÓDULO 2 — GIRA / HOJA DE RUTA SEMANAL
    ===================================================================== */
-/* Recordatorio visual para la oficina, al lado de cada trabajo ya
-   programado en la hoja de ruta: gestiones de contacto con el cliente que
-   conviene tener resueltas antes de la visita. Es sólo un checklist que se
-   despliega en pantalla -- no envía ningún mensaje, no cambia el estado del
-   trabajo ni guarda nada en la base -- para que no se pase por alto
-   confirmar, coordinar el horario, reprogramar o avisar al cliente antes
-   de salir a la gira. */
+/* Checklist de gestión con el cliente, al lado de cada trabajo ya
+   programado en la hoja de ruta: qué falta resolver antes de la visita.
+   Queda asentado en el trabajo (columna "gestion_cliente",
+   sql/43_gestion_cliente_hoja_ruta.sql) para que se vea igual la próxima
+   vez que alguien abra la gira. Mientras sea CONFIRMAR TRABAJOS -- o no
+   haya ninguna cargada -- la parada se ve normal; con cualquiera de las
+   otras tres opciones, el botón y la tarjeta de la parada quedan
+   remarcados en rojo, para que salte a la vista que falta coordinar el
+   horario, reprogramar o avisarle algo al cliente. */
 const OPCIONES_GESTION_CLIENTE = ['CONFIRMAR TRABAJOS', 'COORDINAR HORARIO', 'REPROGRAMAR', 'DAR AVISO AL CLIENTE'];
+/* La única opción que deja la parada "resuelta" (sin remarcar) */
+const GESTION_CLIENTE_RESUELTA = 'CONFIRMAR TRABAJOS';
 
 function Giras() {
   const s = useS();
@@ -5192,6 +5205,15 @@ function Giras() {
   async function moverDia(t, iso) {
     try { await guardarTrabajo(t.id, { fecha_visita: iso }); }
     catch (e) { toast('No se pudo mover: ' + e.message, 'error'); }
+  }
+  /** Asienta (o, si ya estaba elegida, quita) la gestión con el cliente de
+      este trabajo. Clickear de nuevo la opción ya marcada la limpia, para
+      volver a "sin gestión registrada" sin tener que elegir otra. */
+  async function elegirGestionCliente(t, opcion) {
+    setMenuGestion(null);
+    const nueva = t.gestion_cliente === opcion ? null : opcion;
+    try { await guardarTrabajo(t.id, { gestion_cliente: nueva }); }
+    catch (e) { toast('No se pudo guardar la gestión: ' + e.message, 'error'); }
   }
   const dias = useMemo(() => {
     const m = new Map();
@@ -5309,7 +5331,9 @@ function Giras() {
           ${dias.map(([dia, lista]) => html`<div class="dia" key=${dia}>
             <h4><span>${dia === 'sin fecha' ? 'Sin fecha asignada' : fechaLarga(dia)}</span>
               <span>${lista.length} parada${lista.length > 1 ? 's' : ''}</span></h4>
-            ${lista.map((t, i) => html`<div class="parada" key=${t.id}>
+            ${lista.map((t, i) => { const pendienteGestion = t.gestion_cliente
+                && t.gestion_cliente !== GESTION_CLIENTE_RESUELTA; return html`<div
+                class=${'parada' + (pendienteGestion ? ' parada-pendiente-gestion' : '')} key=${t.id}>
               <div class="ord">${i + 1}</div>
               <div class="info" onClick=${() => setFichaId(t.id)} style="cursor:pointer">
                 <b>${t.cliente_nombre || '—'} ${t.estado === 'CUMPLIDO' ? '✓' : ''}</b>
@@ -5317,12 +5341,15 @@ function Giras() {
                 <small>${t.n_serie || ''} ${t.modelo || ''} · ${t.tipo_servicio || ''} · ${t.n_llamada || ''}
                   ${t.cliente_telefono ? ' · ☎ ' + t.cliente_telefono : ''}</small>
                 ${t.obs_servicio && html`<small>${t.obs_servicio}</small>`}
+                ${pendienteGestion && html`<small class="gestion-cli-etq">⚠ ${t.gestion_cliente}</small>`}
               </div>
               ${editable && html`<div class="fila" style="gap:4px;align-items:flex-start">
                 <input type="date" style="width:130px" value=${t.fecha_visita || ''}
                   onChange=${e => moverDia(t, e.target.value)} />
                 <div class="gestion-cli">
-                  <button class="btn sec chico" title="Gestiones pendientes con el cliente para este trabajo"
+                  <button class=${'btn sec chico' + (pendienteGestion ? ' activo' : '')}
+                    title=${'Gestión con el cliente para este trabajo'
+                      + (t.gestion_cliente ? ` (actual: ${t.gestion_cliente})` : ': sin registrar todavía')}
                     onClick=${e => {
                       if (menuGestion && menuGestion.id === t.id) return setMenuGestion(null);
                       const r = e.currentTarget.getBoundingClientRect();
@@ -5332,13 +5359,15 @@ function Giras() {
                     <div class="capa-cierre-menu" onClick=${() => setMenuGestion(null)}></div>
                     <div class="menu-gestion-cli" style=${`top:${menuGestion.top}px;left:${menuGestion.left}px`}>
                       ${OPCIONES_GESTION_CLIENTE.map(op => html`<button key=${op}
-                        onClick=${() => setMenuGestion(null)}>${op}</button>`)}
+                        class=${t.gestion_cliente === op ? 'act' : ''}
+                        onClick=${() => elegirGestionCliente(t, op)}>
+                        ${t.gestion_cliente === op ? '✓ ' : ''}${op}</button>`)}
                     </div>
                   <//>`}
                 </div>
                 <button class="btn sec chico" title="Quitar de la gira" onClick=${() => quitar(t)}>✕</button>
               </div>`}
-            </div>`)}
+            </div>`; })}
           </div>`)}
         </div>
       </div>
