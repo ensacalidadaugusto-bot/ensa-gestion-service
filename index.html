@@ -6289,7 +6289,12 @@ function Cobranza() {
     if (vista === 'facturado_en_curso') return t.facturado === 'EN CURSO'
       && !CERRADO_COBRO.includes(t.cobrado) && !t.fecha_pago;
     if (vista === 'facturacion_cargada') return t.estado === 'CUMPLIDO'
-      && !!idsFacturacionCargada && idsFacturacionCargada.has(t.id);
+      && !!idsFacturacionCargada && idsFacturacionCargada.has(t.id)
+      // Cancelado, Verdejo (lo facturó Alejandro Verdejo por su cuenta) y No
+      // aplica no son casos que Administración tenga que facturar: aunque se
+      // haya tocado algún dato de facturación ese día, no corresponde que
+      // aparezcan en la planilla que se le manda.
+      && !['CANCELADO', 'VERDEJO', 'NO APLICA'].includes(t.facturado);
     if (vista === 'todos_registros') return true;
     return enCirculo(t);
   }), [s.trabajos, vista, idsFacturacionCargada]);
@@ -6671,6 +6676,7 @@ function TablaFacturar({ trabajos, alCerrar }) {
     { rot: 'Concepto', val: t => t.concepto },
     { rot: 'Precio sin IVA', val: t => t.precio_sin_iva },
     { rot: 'Precio con IVA', val: t => Math.round((Number(t.precio_sin_iva) || 0) * (1 + ivaDe(t) / 100)) },
+    { rot: 'Observaciones', val: t => t.obs_servicio },
   ];
 
   return html`<div class="fondo" style="justify-content:center;align-items:flex-start;padding:14px;overflow:auto">
@@ -6700,6 +6706,7 @@ function TablaFacturar({ trabajos, alCerrar }) {
               <th>N° LL</th><th>Cliente</th><th>CUIT/CUIL/DNI</th>
               <th>Correo</th><th>Teléfono</th><th>Tipo de factura</th><th>N° Serie</th>
               <th>Concepto</th><th class="der">Sin IVA</th><th class="der">Con IVA</th>
+              <th>Observaciones</th>
             </tr></thead>
             <tbody>
               ${filas.map(t => html`<tr key=${t.id}>
@@ -6713,11 +6720,13 @@ function TablaFacturar({ trabajos, alCerrar }) {
                 <td class="largo">${t.concepto || ''}</td>
                 <td class="num">${plata(t.precio_sin_iva)}</td>
                 <td class="num">${plata((Number(t.precio_sin_iva) || 0) * (1 + ivaDe(t) / 100))}</td>
+                <td class="largo">${t.obs_servicio || ''}</td>
               </tr>`)}
               <tr style="border-top:2px solid var(--borde)">
                 <td colspan="8" class="der"><b>Totales</b></td>
                 <td class="num"><b>${plata(totalSinIva)}</b></td>
                 <td class="num"><b>${plata(totalConIva)}</b></td>
+                <td></td>
               </tr>
             </tbody>
           </table>
