@@ -6676,7 +6676,7 @@ function TablaFacturar({ trabajos, alCerrar }) {
     { rot: 'Concepto', val: t => t.concepto },
     { rot: 'Precio sin IVA', val: t => t.precio_sin_iva },
     { rot: 'Precio con IVA', val: t => Math.round((Number(t.precio_sin_iva) || 0) * (1 + ivaDe(t) / 100)) },
-    { rot: 'Observaciones', val: t => t.obs_servicio },
+    { rot: 'Observaciones', val: t => t.obs_cobranza },
   ];
 
   return html`<div class="fondo" style="justify-content:center;align-items:flex-start;padding:14px;overflow:auto">
@@ -6720,7 +6720,7 @@ function TablaFacturar({ trabajos, alCerrar }) {
                 <td class="largo">${t.concepto || ''}</td>
                 <td class="num">${plata(t.precio_sin_iva)}</td>
                 <td class="num">${plata((Number(t.precio_sin_iva) || 0) * (1 + ivaDe(t) / 100))}</td>
-                <td class="largo">${t.obs_servicio || ''}</td>
+                <td class="largo">${t.obs_cobranza || ''}</td>
               </tr>`)}
               <tr style="border-top:2px solid var(--borde)">
                 <td colspan="8" class="der"><b>Totales</b></td>
