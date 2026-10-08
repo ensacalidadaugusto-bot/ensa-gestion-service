@@ -4254,15 +4254,33 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
           </div>
 
           <div class="fila" style="gap:12px;flex-wrap:wrap;margin-bottom:10px;align-items:stretch">
-            <div class="aviso" style="flex:1;min-width:240px;margin-bottom:0">
-              <div class="fila" style="justify-content:space-between;align-items:center;gap:8px">
-                <b>Comentario interno (Servicio)</b>
-                <button class="btn sec chico" disabled=${refrescandoComentario} onClick=${refrescarComentario}
-                  title="Vuelve a leer este trabajo, por si se cargó o cambió el comentario desde que se abrió esta ficha">
-                  ${refrescandoComentario ? 'Refrescando…' : '↻ Refrescar'}</button>
+            <div class="fila" style="flex:1;min-width:240px;flex-direction:column;gap:12px">
+              <div class="aviso" style="margin-bottom:0">
+                <b>Monto del trabajo (Servicio)</b>
+                <div class="mini" style="margin-top:6px">
+                  ${(original && original.monto_trabajo !== null && original.monto_trabajo !== undefined
+                      && original.monto_trabajo !== '')
+                    ? html`<${Fragment}>
+                        <b>${plata(original.monto_trabajo)}</b>
+                        ${original.monto_trabajo_condicion
+                          ? ' — ' + (ETIQUETAS_CONDICION_MONTO[original.monto_trabajo_condicion]
+                              || original.monto_trabajo_condicion)
+                          : ' — sin condición definida'}
+                      <//>`
+                    : '— sin monto cargado —'}
+                </div>
               </div>
-              <div class="mini" style="white-space:pre-wrap;margin-top:6px">
-                ${(original && original.comentarios) || '— sin comentarios cargados —'}</div>
+
+              <div class="aviso" style="margin-bottom:0">
+                <div class="fila" style="justify-content:space-between;align-items:center;gap:8px">
+                  <b>Comentario interno (Servicio)</b>
+                  <button class="btn sec chico" disabled=${refrescandoComentario} onClick=${refrescarComentario}
+                    title="Vuelve a leer este trabajo, por si se cargó o cambió el comentario o el monto desde que se abrió esta ficha">
+                    ${refrescandoComentario ? 'Refrescando…' : '↻ Refrescar'}</button>
+                </div>
+                <div class="mini" style="white-space:pre-wrap;margin-top:6px">
+                  ${(original && original.comentarios) || '— sin comentarios cargados —'}</div>
+              </div>
             </div>
 
             <div class="aviso" style="flex:1;min-width:240px;margin-bottom:0">
