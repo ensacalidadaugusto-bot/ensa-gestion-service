@@ -332,6 +332,21 @@ table.grilla.registro tbody tr.tono-facturando{--canto:var(--sv-1)}
    por cerrar" (rojo) -- un tercer color, más discreto, para no confundirlo
    con el trabajo que sí necesita atención hoy */
 table.grilla.registro tbody tr.tono-pendiente-cobranza{--canto:var(--alerta)}
+/* "Trabajo pendiente": el técnico ya estuvo, pero el equipo no quedó
+   funcionando y hace falta programar otra visita -- no se cobra ni se
+   factura este trabajo. Tiene que saltar a la vista mucho más que un
+   simple "abierto" (tono-abierto, sólo canto): además del canto rojo,
+   toda la tarjeta queda con un fondo rojo tenue y un contorno rojo más
+   grueso que el de "sin-facturar". */
+table.grilla.registro tbody tr.tono-urgente{--canto:var(--error);
+  background:color-mix(in srgb, var(--error) 7%, var(--papel))}
+table.grilla.registro tbody tr.tono-urgente:hover{background:color-mix(in srgb, var(--error) 12%, var(--papel))}
+table.grilla.registro tbody tr.tono-urgente td{border-top-color:var(--error);border-bottom-color:var(--error);
+  border-top-width:2px;border-bottom-width:2px}
+table.grilla.registro tbody tr.tono-urgente td:first-child{border-left-color:var(--error);border-left-width:6px}
+table.grilla.registro tbody tr.tono-urgente td:last-child{border-right-color:var(--error);border-right-width:2px}
+table.grilla.registro tbody tr.tono-urgente:hover td{border-top-color:var(--error);border-bottom-color:var(--error)}
+table.grilla.registro tbody tr.tono-urgente:hover td:last-child{border-right-color:var(--error)}
 table.grilla.registro tbody tr.tono-hacer  {--canto:var(--fila-hacer-b)}
 table.grilla.registro tbody tr.tono-mirar  {--canto:var(--violeta)}
 table.grilla.registro tbody tr.tono-gris   {--canto:var(--borde)}
@@ -379,6 +394,7 @@ table.grilla.registro tbody tr{transition:border-color .08s}
 
 /* anchos de cada columna (hasta TÉCNICO: entran en pantalla) */
 table.grilla.registro th.c-ll     {width:clamp(74px,5.70vw,92px)}
+table.grilla.registro th.c-ot     {width:clamp(66px,5.10vw,84px)}
 table.grilla.registro th.c-pedido {width:clamp(100px,8.10vw,130px)}
 table.grilla.registro th.c-serie  {width:clamp(58px,4.50vw,76px)}
 table.grilla.registro th.c-modelo {width:clamp(48px,3.75vw,66px)}
@@ -421,6 +437,20 @@ table.grilla.registro td.etq{white-space:nowrap;overflow:hidden;text-overflow:cl
 .et.violeta{background:var(--et-violeta);color:var(--et-violeta-t)}
 /* trabajo cumplido pero abierto administrativamente: tiene que saltar a la vista */
 .et.alarma{background:var(--error);color:#fff;box-shadow:0 0 0 3px color-mix(in srgb, var(--error) 22%, transparent)}
+/* "Trabajo pendiente": el cartel más fuerte de toda la grilla -- tiene que
+   saltar a la vista por encima incluso de "⚠ ABIERTO" (.et.alarma): acá no
+   sólo falta un trámite administrativo, el equipo quedó sin funcionar y
+   hace falta volver. Mismo rojo que .et.alarma (no se inventa un color
+   nuevo, para no confundir el significado), pero más grande, con borde
+   propio en blanco y un resplandor que palpita sin parar. */
+.et.urgente{background:var(--error);color:#fff;font-size:12px;font-weight:700;
+  padding:3px 10px;border:1px solid #fff;
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--error) 35%, transparent);
+  animation:pulso-urgente 1.6s ease-in-out infinite}
+@keyframes pulso-urgente{
+  0%,100%{box-shadow:0 0 0 3px color-mix(in srgb, var(--error) 35%, transparent)}
+  50%{box-shadow:0 0 0 7px color-mix(in srgb, var(--error) 55%, transparent)}
+}
 /* Cumplido pero con el circuito de cobranza sin terminar (falta facturar,
    cobrar o cerrar): un tinte apenas insinuado -- casi blanco -- y no un
    color fuerte, porque esto es una cuestión administrativa, no un trabajo
@@ -1588,8 +1618,18 @@ function faltaFacturacion(t) {
    cobró -- sigue apareciendo en "Pendientes de cobro", en Cobranza, hasta
    que alguien lo marque como pagado. */
 const CIERRE_PENDIENTE_COBRANZA = 'PENDIENTE COBRANZA';
+/* "TRABAJO PENDIENTE": un cuarto estado de cierre. Es para un trabajo que
+   se marcó CUMPLIDO pero en el que, en rigor, todavía queda algo por
+   hacer -- hay que programar otra visita para dejar el equipo funcionando
+   -- así que no corresponde ni cobrarlo ni facturarlo todavía. Igual que
+   PENDIENTE COBRANZA, saca al trabajo de "cumplidos sin cerrar" (no es
+   algo que Administración tenga que perseguir), pero a diferencia de
+   aquél no es un tema de plata: es un tema de servicio sin terminar, así
+   que se marca con el cartel más fuerte de toda la grilla. */
+const CIERRE_TRABAJO_PENDIENTE = 'TRABAJO PENDIENTE';
 function estaAbierto(t) {
-  return t.estado === 'CUMPLIDO' && t.cierre !== 'CERRADO' && t.cierre !== CIERRE_PENDIENTE_COBRANZA;
+  return t.estado === 'CUMPLIDO' && t.cierre !== 'CERRADO' && t.cierre !== CIERRE_PENDIENTE_COBRANZA
+    && t.cierre !== CIERRE_TRABAJO_PENDIENTE;
 }
 
 /* ---------------------------------------------------------------------
@@ -1683,6 +1723,7 @@ function tonoDeFila(t) {
   if (t.estado === 'CUMPLIDO') {
     if (t.cierre === 'CERRADO') return 'listo';
     if (t.cierre === CIERRE_PENDIENTE_COBRANZA) return 'pendiente-cobranza';
+    if (t.cierre === CIERRE_TRABAJO_PENDIENTE) return 'urgente';
     if (faltaFacturacion(t)) return t.facturado === 'EN CURSO' ? 'facturando' : 'sin-facturar';
     return 'abierto';
   }
@@ -1693,6 +1734,7 @@ function cierreQueCorresponde(t) {
   if (t.estado !== 'CUMPLIDO') return null;
   if (t.cierre === 'CERRADO') return 'CERRADO';
   if (t.cierre === CIERRE_PENDIENTE_COBRANZA) return CIERRE_PENDIENTE_COBRANZA;
+  if (t.cierre === CIERRE_TRABAJO_PENDIENTE) return CIERRE_TRABAJO_PENDIENTE;
   return 'ABIERTO';
 }
 /* ---------------------------------------------------------------------
@@ -1704,9 +1746,10 @@ function cierreQueCorresponde(t) {
 function cierreAutomatico(cuerpo) {
   const c = { ...cuerpo };
   if (c.estado !== 'CUMPLIDO') { c.cierre = null; return c; }
-  // CERRADO y PENDIENTE COBRANZA son decisiones explícitas (los botones de
-  // cierre de la ficha): se respetan tal cual, no se recalculan solas.
-  if (c.cierre === 'CERRADO' || c.cierre === CIERRE_PENDIENTE_COBRANZA) return c;
+  // CERRADO, PENDIENTE COBRANZA y TRABAJO PENDIENTE son decisiones
+  // explícitas (los botones de cierre de la ficha): se respetan tal cual,
+  // no se recalculan solas.
+  if ([ 'CERRADO', CIERRE_PENDIENTE_COBRANZA, CIERRE_TRABAJO_PENDIENTE ].includes(c.cierre)) return c;
   if (cobradoEnMano(c) && !faltaParaCerrar(c).length) { c.cierre = 'CERRADO'; return c; }
   c.cierre = 'ABIERTO';
   return c;
@@ -1947,9 +1990,10 @@ function puedeCrear()    { return enRol('admin', 'oficina', 'carga'); }
     sólo Augusto (admin) y Mateo (carga) -- ni oficina, ni cobranza, ni lectura */
 function puedePlanificacionRRHH() { return enRol('admin', 'carga'); }
 /** ver el módulo "Elevadores a ofertar" (equipos sin asistencia hace más
-    de 11 meses, candidatos para ofrecerles mantenimiento):
-    sólo Augusto (admin) y Mateo (carga), el mismo dúo de Planificación RRHH */
-function puedeOfertar() { return enRol('admin', 'carga'); }
+    de 11 meses, candidatos para ofrecerles mantenimiento): admin, carga
+    y el visualizador general (lectura), que entra a todos los módulos
+    menos Administración */
+function puedeOfertar() { return enRol('admin', 'carga', 'lectura'); }
 /** cualquier permiso de edición (para mostrar u ocultar el botón Guardar) */
 function puedeEditar()   { return !enRol('lectura', 'consulta'); }
 
@@ -2352,6 +2396,7 @@ function filaProvisoria(tmp, cuerpo, tecnicos) {
   return {
     ...cuerpo, id: tmp, sin_sincronizar: true,
     n_llamada: cuerpo.n_llamada || '(se numera al subir)',
+    n_ot: cuerpo.n_ot || '(se numera al subir)',
     cliente_nombre: cli ? cli.nombre : '', cliente_ciudad: cli ? cli.ciudad : '',
     cliente_provincia: cli ? cli.provincia : '', cliente_direccion: cli ? cli.direccion : '',
     cliente_telefono: cli ? cli.telefono : '', cliente_cuit: cli ? cli.cuit_dni : '',
@@ -2698,6 +2743,7 @@ const COLS_REGISTRO = [
   ['Fecha de visita',            t => t.fecha_visita && { f: t.fecha_visita }],
   ['Última modificación',        t => t.actualizado_en ? momento(t.actualizado_en) : null],
   ['Modificado por',             t => t.actualizado_por],
+  ['N° OT',                      t => t.n_ot],
 ];
 
 /* Hoja de cobranza: sólo lo facturable, con el circuito completo */
@@ -3237,6 +3283,9 @@ function MarcaCierre({ t }) {
   if (c === 'CERRADO') return html`<span class="et verde">CERRADO</span>`;
   if (c === CIERRE_PENDIENTE_COBRANZA) return html`<span class="et ambar"
     title="Cerrado técnicamente; queda un pago pendiente por cobrar">PENDIENTE COBRANZA</span>`;
+  if (c === CIERRE_TRABAJO_PENDIENTE) return html`<span class="et urgente"
+    title="Falta programar otra visita para dejar el equipo funcionando. No se cobra ni se factura.">
+    ⚠ TRABAJO PENDIENTE</span>`;
   const falta = faltaParaCerrar(t);
   return html`<span class="et alarma" title=${falta.length ? 'Falta ' + falta.join(' y ') : 'Listo para cerrar'}>
     ⚠ ABIERTO</span>`;
@@ -3251,14 +3300,15 @@ function MarcaCierre({ t }) {
    que va escrito a mano acá.
    --------------------------------------------------------------------- */
 function Leyenda({ alCerrar }) {
-  const Swatch = v => html`<span style="display:inline-block;width:14px;height:14px;border-radius:3px;
-    background:var(--${v});flex:none;margin-top:3px"></span>`;
+  const Swatch = (v, fuerte) => html`<span style=${`display:inline-block;width:14px;height:14px;border-radius:3px;
+    background:var(--${v});flex:none;margin-top:3px` + (fuerte ? ';animation:pulso-urgente 1.6s ease-in-out infinite' : '')}></span>`;
   const Fila = (marca, texto, det) => html`<div class="fila" style="align-items:flex-start;gap:10px;margin-bottom:8px">
     ${marca}<div>${texto ? html`<div>${texto}</div>` : ''}${det ? html`<div class="mini">${det}</div>` : ''}</div>
   </div>`;
 
   const TONOS = [
     ['ok', 'Listo', 'Cumplido y cerrado: no queda nada pendiente.'],
+    ['error', 'Trabajo pendiente', 'El cartel más fuerte de la grilla (parpadea): el técnico ya estuvo, pero el equipo no quedó funcionando y hace falta programar otra visita. No se cobra ni se factura.', true],
     ['error', 'Abierto', 'Cumplido pero todavía abierto administrativamente: falta definir la facturación y/o cargar las observaciones del servicio.'],
     ['alerta', 'Pendiente cobranza', 'Cerrado técnicamente para no seguir persiguiéndolo, pero todavía tiene un pago viejo sin cobrar.'],
     ['fila-hacer-b', 'Por hacer', 'Pendiente o programado: todavía no se hizo la visita.'],
@@ -3271,7 +3321,7 @@ function Leyenda({ alCerrar }) {
   return html`<${Modal} titulo="Referencias del Registro de Service" alCerrar=${alCerrar} ancho=${680}>
     <fieldset><legend>Color del borde de cada fila</legend>
       <div class="mini" style="margin-bottom:10px">En qué anda el trabajo, de un solo vistazo, sin leer nada.</div>
-      ${TONOS.map(([v, rot, det]) => Fila(Swatch(v), html`<b>${rot}</b>`, det))}
+      ${TONOS.map(([v, rot, det, fuerte]) => Fila(Swatch(v, fuerte), html`<b>${rot}</b>`, det))}
     </fieldset>
     <fieldset><legend>Estado</legend>
       ${opciones('estado').map(v => Fila(html`<${Et} txt=${v} mapa=${COLOR_ESTADO} />`, '', detalleCat('estado', v)))}
@@ -3292,6 +3342,8 @@ function Leyenda({ alCerrar }) {
         'Cumplido pero falta algo para cerrarlo del lado administrativo. Se ve también en Cobranza, en "Cumplidos sin cerrar".')}
       ${Fila(html`<span class="et ambar">PENDIENTE COBRANZA</span>`, '',
         'Un caso viejo que no se va a cobrar en lo inmediato: se sacó de "Cumplidos sin cerrar" para no seguir persiguiéndolo, pero sigue viéndose en "Pendientes de cobro" hasta que se marque como pagado.')}
+      ${Fila(html`<span class="et urgente">⚠ TRABAJO PENDIENTE</span>`, '',
+        'El cartel más fuerte de la grilla (parpadea): el técnico ya estuvo, pero el equipo no quedó funcionando y hace falta programar otra visita. No se cobra ni se factura esta vez; la facturación y el cobro quedan en "No aplica".')}
     </fieldset>
     <fieldset><legend>Otras señales de esta grilla</legend>
       ${Fila(Swatch('error'), html`<b>Texto de toda la fila en rojo</b>`,
@@ -3321,7 +3373,7 @@ function Sel({ rot, valor, opts, alCambiar, vacio = '—', disabled, etiquetas, 
 /* Los campos avisan al escribir (onInput) y no al perder el foco: así, si alguien
    escribe y hace clic en un botón, ese primer clic no se pierde. En los números se
    guarda lo tecleado tal cual mientras dura la edición (para poder escribir "1.5"). */
-function Txt({ rot, valor, alCambiar, tipo = 'text', area, disabled, placeholder, ancho }) {
+function Txt({ rot, valor, alCambiar, tipo = 'text', area, disabled, placeholder, ancho, titulo }) {
   const [crudo, setCrudo] = useState(null);
   const mostrado = crudo !== null ? crudo
     : (valor === null || valor === undefined ? '' : valor);
@@ -3336,7 +3388,7 @@ function Txt({ rot, valor, alCambiar, tipo = 'text', area, disabled, placeholder
     }
   };
   const props = {
-    value: mostrado, disabled, placeholder,
+    value: mostrado, disabled, placeholder, title: titulo,
     onInput: alEscribir, onChange: alEscribir, onBlur: () => setCrudo(null),
   };
   const el = area ? html`<textarea ...${props} rows=${area}></textarea>`
@@ -3708,7 +3760,8 @@ function Trabajos() {
   const monto = filtrados.reduce((a, t) => a + (Number(t.precio_sin_iva) || 0), 0);
   const sinCerrar = useMemo(() => s.trabajos.filter(estaAbierto).length, [s.trabajos]);
   const cols = [
-    { rot: 'N° LL', val: t => t.n_llamada }, { rot: 'Tipo de pedido', val: t => t.tipo_pedido },
+    { rot: 'N° LL', val: t => t.n_llamada }, { rot: 'N° OT', val: t => t.n_ot },
+    { rot: 'Tipo de pedido', val: t => t.tipo_pedido },
     { rot: 'N° Serie', val: t => t.n_serie }, { rot: 'Modelo', val: t => t.modelo },
     { rot: 'Fecha de instalación', val: t => fecha(t.fecha_instalacion, 1) },
     { rot: 'Paradas', val: t => t.n_paradas }, { rot: 'Cliente', val: t => t.cliente_nombre },
@@ -3746,6 +3799,12 @@ function Trabajos() {
       td: t => html`<td class="congelada corta"><b>${t.n_llamada || '#' + t.id}</b>${
         t.sin_sincronizar ? html`<span class="et gris" style="margin-left:4px"
           title="Todavía sin subir: se sube solo cuando vuelva internet">⟳</span>` : null}</td>` },
+    /* Orden de trabajo (sql/45_orden_de_trabajo.sql): un código propio para
+       trazabilidad, numerado solo al crear el trabajo y que no se puede
+       editar a mano -- a diferencia del N° de llamada, que es el número de
+       llamada del cliente y sí se puede corregir. */
+    { id: 'n_ot', rot: 'N° OT', campo: 'n_ot', claseTh: 'c-ot',
+      td: t => html`<td class="corta" title="Orden de trabajo, para trazabilidad"><b>${t.n_ot || '—'}</b></td>` },
     { id: 'tipo_pedido', rot: 'Pedido', campo: 'tipo_pedido', claseTh: 'c-pedido',
       td: t => html`<td class="pedido"><div class="rec">${t.tipo_pedido}</div></td>` },
     { id: 'n_serie', rot: 'Serie', campo: 'n_serie', claseTh: 'c-serie',
@@ -3837,7 +3896,8 @@ function Trabajos() {
           ${conFiltroFecha ? '📅 fechas ✓' : '📅 fechas'}</button>
         ${verPlata && html`<${Sel} valor=${f.cobrado} opts=${opciones('cobrado')} vacio="Cobrado: todos"
           alCambiar=${v => cambiar('cobrado', v)} />`}
-        ${verPlata && html`<${Sel} valor=${f.cierre} opts=${['ABIERTO', 'CERRADO', CIERRE_PENDIENTE_COBRANZA]} vacio="Cierre: todos"
+        ${verPlata && html`<${Sel} valor=${f.cierre}
+          opts=${['ABIERTO', 'CERRADO', CIERRE_PENDIENTE_COBRANZA, CIERRE_TRABAJO_PENDIENTE]} vacio="Cierre: todos"
           alCambiar=${v => cambiar('cierre', v)} />`}
         <label class="fila mini" style="gap:4px;white-space:nowrap">
           <input type="checkbox" style="width:auto" checked=${f.abiertos}
@@ -4160,10 +4220,21 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
      tenía -- puede marcar como "tocado" algo de la planificación del
      trabajo y rechazar el guardado con "no puede tocar la planificación",
      aunque la persona sólo haya apretado "Cerrar trabajo". */
-  async function cerrarComo(valorCierre, aviso) {
+  async function cerrarComo(valorCierre, aviso, camposExtra) {
     setGuardando(true);
-    try { await cambiarCobranza({ cierre: valorCierre }, aviso); }
+    try { await cambiarCobranza({ cierre: valorCierre, ...camposExtra }, aviso); }
     finally { setGuardando(false); }
+  }
+  /* "Trabajo pendiente": el técnico ya estuvo, pero el equipo no quedó
+     funcionando y hace falta programar otra visita -- así que no
+     corresponde cobrar ni facturar esta vez. Además de cerrar con ese
+     motivo, se deja la facturación y el cobro en "No aplica" de una vez,
+     para no dejar colgado un estado de plata de un trabajo que no se le
+     va a cobrar al cliente. */
+  async function cerrarComoTrabajoPendiente() {
+    await cerrarComo(CIERRE_TRABAJO_PENDIENTE,
+      'Cerrado como trabajo pendiente: no se cobra ni se factura, falta otra visita',
+      { facturado: 'NO APLICA', fecha_factura: null, cobrado: 'NO APLICA', fecha_pago: null });
   }
   // sugerir prioridad según el tipo de servicio
   const elegirServicio = v => {
@@ -4171,11 +4242,12 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
     setB(x => ({ ...x, tipo_servicio: v, prioridad: (cat && cat.extra) || x.prioridad }));
   };
   // al pasar a CUMPLIDO el trabajo queda ABIERTO hasta que alguien lo cierre
-  // (si ya estaba CERRADO o PENDIENTE COBRANZA, esa decisión se respeta)
+  // (si ya estaba CERRADO, PENDIENTE COBRANZA o TRABAJO PENDIENTE, esa
+  // decisión se respeta)
   const elegirEstado = v => setB(x => ({
     ...x, estado: v,
     cierre: v === 'CUMPLIDO'
-      ? (['CERRADO', CIERRE_PENDIENTE_COBRANZA].includes(x.cierre) ? x.cierre : 'ABIERTO')
+      ? (['CERRADO', CIERRE_PENDIENTE_COBRANZA, CIERRE_TRABAJO_PENDIENTE].includes(x.cierre) ? x.cierre : 'ABIERTO')
       : null,
   }));
   /* Los datos de cobranza ya no se editan desde acá: se muestran y se guardan
@@ -4390,13 +4462,20 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
               <button class="btn sec" disabled=${guardando}
                 title="Para casos viejos que no se van a cobrar en lo inmediato: lo saca de la cola de pendientes, pero deja registrado que todavía debe"
                 onClick=${() => cerrarComo(CIERRE_PENDIENTE_COBRANZA, 'Cerrado como pendiente de cobranza')}>Cerrar (pendiente de cobranza)</button>
+              <button class="btn sec" disabled=${guardando}
+                title="El técnico ya estuvo, pero el equipo no quedó funcionando: hace falta programar otra visita. No corresponde cobrar ni facturar esta vez."
+                onClick=${cerrarComoTrabajoPendiente}>Cerrar (trabajo pendiente)</button>
             </div>`}
           </div>`}
-        ${puedeVerPlata() && !nuevo && (b2.cierre === 'CERRADO' || b2.cierre === CIERRE_PENDIENTE_COBRANZA) && html`
+        ${puedeVerPlata() && !nuevo
+            && [ 'CERRADO', CIERRE_PENDIENTE_COBRANZA, CIERRE_TRABAJO_PENDIENTE ].includes(b2.cierre) && html`
           <div class="fila mini" style="margin-bottom:10px">
-            <span class=${'et ' + (b2.cierre === 'CERRADO' ? 'verde' : 'ambar')}>${b2.cierre}</span>
+            <span class=${b2.cierre === CIERRE_TRABAJO_PENDIENTE ? 'et urgente'
+              : 'et ' + (b2.cierre === 'CERRADO' ? 'verde' : 'ambar')}>${b2.cierre}</span>
             <span>${b2.cierre === 'CERRADO'
               ? 'El trabajo está terminado también en lo administrativo.'
+              : b2.cierre === CIERRE_TRABAJO_PENDIENTE
+              ? 'Hace falta programar otra visita para dejar el equipo funcionando. No se cobra ni se factura este trabajo.'
               : 'Cerrado técnicamente, pero todavía tiene un pago pendiente. El cobro se sigue viendo en Cobranza.'}</span>
             ${edCob && html`<div class="fila" style="margin-left:auto;gap:6px">
               ${b2.cierre === CIERRE_PENDIENTE_COBRANZA && html`<button class="btn chico" disabled=${guardando}
@@ -4416,6 +4495,9 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
                 alCambiar=${v => c('prioridad', v)} disabled=${!edServ} />
               <${Txt} rot="N° de llamada" valor=${b.n_llamada} alCambiar=${v => c('n_llamada', v)}
                 disabled=${!edServ} placeholder=${nuevo ? 'automático' : ''} />
+              <${Txt} rot="N° OT" valor=${b.n_ot} alCambiar=${() => {}} disabled=${true}
+                placeholder=${nuevo ? 'se asigna al crear' : ''}
+                titulo="Orden de trabajo: se numera sola al crear el trabajo y no se puede corregir a mano -- es el código para hacer trazabilidad." />
               <${Txt} rot="Fecha del pedido" tipo="date" valor=${b.fecha_pedido}
                 alCambiar=${v => c('fecha_pedido', v)} disabled=${!edServ} />
             </div>
@@ -5432,7 +5514,7 @@ function Giras() {
         <div style="margin-left:auto" class="fila">
           ${puedePlanificacionRRHH() && html`<button class="btn sec" disabled=${!paradas.length}
             title="Planilla imprimible para RR.HH., con quién hace cada trabajo de esta gira"
-            onClick=${() => setVerRRHH(true)}>🖨 Planificación RRHH</button>`}
+            onClick=${() => setVerRRHH(true)}>🖨 Planificación</button>`}
           <button class="btn" disabled=${!paradas.length}
             onClick=${() => setImprimir(true)}>🖨 Imprimir planilla de trabajos</button>
         </div>
@@ -5645,6 +5727,10 @@ function NuevaGira({ alCerrar }) {
 const COLS_HOJA = [
   // rótulo, valor, ancho mínimo en pantalla (px), ancho al imprimir (% de la hoja)
   ['N° LL',                t => t.n_llamada,               52,  4.0, 'corta'],
+  /* Orden de trabajo (sql/45_orden_de_trabajo.sql): el código de
+     trazabilidad queda impreso en la misma hoja que se le entrega al
+     técnico, junto al N° de llamada. */
+  ['N° OT',                t => t.n_ot,                    58,  4.4, 'corta'],
   ['Tipo de Pedido',       t => t.tipo_pedido,             92,  6.6],
   ['Fecha de Instalación', t => fecha(t.fecha_instalacion), 66, 5.0, 'corta'],
   ['N° Serie',             t => t.n_serie,                 58,  4.4, 'corta'],
@@ -5963,8 +6049,6 @@ const COLS_RRHH_HOJA = [
   ['N° Serie',      t => t.n_serie,               58,  0, 'corta'],
   ['Modelo',        t => t.modelo,                55,  0, 'corta'],
   ['N° Paradas',    t => t.n_paradas,             48,  0, 'corta'],
-  ['Motorización',  t => t.motorizacion,          70,  0, 'corta'],
-  ['Puerta',        t => t.puerta,                60,  0, 'corta'],
   ['Cliente',       t => t.cliente_nombre,        170, 0],
   ['Ciudad',        t => ciudadDe(t),              90, 0],
   ['Provincia',     t => provinciaDe(t),           90, 0],
@@ -5993,7 +6077,7 @@ function PlanificacionRRHH({ gira, paradas, alCerrar }) {
       <div class="encabezado-hoja">
         <div>
           <img class="logo-hoja" src=${LOGO_NEGRO} alt="ENSA" />
-          <div class="titulo-hoja">Planificación RRHH — ${gira.n_semana ? `Semana ${gira.n_semana}` : 'sin semana'}${gira.zona ? ' en ' + gira.zona : ''}</div>
+          <div class="titulo-hoja">Planificación — ${gira.n_semana ? `Semana ${gira.n_semana}` : 'sin semana'}${gira.zona ? ' en ' + gira.zona : ''}</div>
           <div class="mini">Semana del ${fecha(gira.fecha_desde, 1)}${gira.fecha_hasta ? ' al ' + fecha(gira.fecha_hasta, 1) : ''}</div>
         </div>
         <div class="mini der">
@@ -6012,7 +6096,7 @@ function PlanificacionRRHH({ gira, paradas, alCerrar }) {
   return html`<div class="fondo" style="justify-content:center;align-items:flex-start;padding:14px;overflow:auto">
     <div class="panel hoja-impresion" style="width:100%;max-width:1300px;background:var(--papel)">
       <div class="panel-cab no-imprimir">
-        <h2>Planificación RRHH — semana ${gira.n_semana || ''}</h2>
+        <h2>Planificación — semana ${gira.n_semana || ''}</h2>
         <select style="width:auto" value=${tam} onChange=${e => setTam(Number(e.target.value))}>
           ${[16, 15, 14, 13, 12, 11, 10, 9].map(n => html`<option value=${n}>Letra ${n}${
             n === recomendado ? ' (recomendada)' : ''}</option>`)}
@@ -6028,7 +6112,7 @@ function PlanificacionRRHH({ gira, paradas, alCerrar }) {
         <div class="encabezado-hoja no-imprimir">
           <div>
             <img class="logo-hoja" src=${LOGO_NEGRO} alt="ENSA" />
-            <div class="titulo-hoja">Planificación RRHH — ${gira.n_semana ? `Semana ${gira.n_semana}` : 'sin semana'}${gira.zona ? ' en ' + gira.zona : ''}</div>
+            <div class="titulo-hoja">Planificación — ${gira.n_semana ? `Semana ${gira.n_semana}` : 'sin semana'}${gira.zona ? ' en ' + gira.zona : ''}</div>
             <div class="mini">Semana del ${fecha(gira.fecha_desde, 1)}${gira.fecha_hasta ? ' al ' + fecha(gira.fecha_hasta, 1) : ''}</div>
           </div>
           <div class="mini der">
@@ -6683,6 +6767,18 @@ function Cobranza() {
     await cambiar(t, { cierre: 'PENDIENTE COBRANZA' }, 'Cerrado como pendiente de cobranza');
   }
 
+  /* "Trabajo pendiente": el técnico ya estuvo, pero el equipo no quedó
+     funcionando y hace falta programar otra visita -- no corresponde
+     cobrar ni facturar este trabajo todavía. Además de cerrarlo con ese
+     motivo, se deja la facturación y el cobro en "No aplica" de una vez,
+     para no dejar colgado un estado de plata de un trabajo que no se le
+     va a cobrar al cliente (mismo criterio que en la ficha de Registro
+     de Service). */
+  async function trabajoPendiente(t) {
+    await cambiar(t, { cierre: 'TRABAJO PENDIENTE', facturado: 'NO APLICA', fecha_factura: null,
+      cobrado: 'NO APLICA', fecha_pago: null }, 'Cerrado como trabajo pendiente');
+  }
+
   const cols = [
     { rot: 'N° LL', val: t => t.n_llamada }, { rot: 'Cliente', val: t => t.cliente_nombre },
     { rot: 'CUIT/DNI', val: t => t.cliente_cuit }, { rot: 'N° Serie', val: t => t.n_serie },
@@ -6885,10 +6981,16 @@ function Cobranza() {
                   <button class="btn sec chico"
                     title="Para casos viejos que no se van a cobrar en lo inmediato: lo saca de la cola pero deja registrado que todavía debe"
                     onClick=${() => pendienteCobranza(t)}>Pendiente cobranza</button>
+                  <button class="btn sec chico"
+                    title="El técnico ya estuvo, pero el equipo no quedó funcionando: hace falta programar otra visita. No corresponde cobrar ni facturar esta vez."
+                    onClick=${() => trabajoPendiente(t)}>Trabajo pendiente</button>
                 </div>`
               : (t.cierre === 'PENDIENTE COBRANZA'
                 ? html`<button class="btn chico" onClick=${() => cerrar(t)}>Ya pagó: cerrar</button>`
-                : ''))}</td>
+                : (t.cierre === 'TRABAJO PENDIENTE'
+                  ? html`<button class="btn sec chico" title="Reabrir este trabajo"
+                      onClick=${() => cambiar(t, { cierre: 'ABIERTO' }, 'Trabajo reabierto')}>Reabrir</button>`
+                  : '')))}</td>
             <td>${editable
               ? html`<${CampoGrilla} valor=${t.obs_cobranza} ancho=${220} titulo="Observaciones de cobranza"
                   onGuardar=${v => cambiar(t, { obs_cobranza: v })} />`
@@ -7387,6 +7489,10 @@ async function traerProductividad(periodo) {
    ===================================================================== */
 function Productividad() {
   const s = useS();
+  // El visualizador general entra a este módulo igual que a cualquier otro,
+  // pero no puede tocar nada: sólo el administrador corrige minutos, pagos
+  // y el cuadro de valores del mes.
+  const editable = esAdmin();
   const hoy = hoyISO();
   const [periodo, setPeriodo] = useState(hoy.slice(0, 7));
   const [tecnicoId, setTecnicoId] = useState(null);
@@ -7627,6 +7733,18 @@ function Productividad() {
       ...d.textos.filter(x => String(x.tecnico_id) !== String(tecActual)), fila] }));
   }
 
+  /* Cambiar la categoría laboral del técnico elegido sin tener que ir hasta
+     Admin → Técnicos: es la misma columna (sql/42_categoria_trabajador_
+     productividad.sql) que cambiarCategoriaTecnico() en 90_admin.js, nada
+     más que editada desde acá, en el momento en que se nota que falta. */
+  async function cambiarCategoriaAca(categoria_laboral) {
+    if (!tecnico) return;
+    const r = await actualizarYComprobar('tecnicos', tecnico.id, { categoria_laboral: categoria_laboral || null });
+    if (!r.ok) return toast(r.msg, 'error');
+    set({ tecnicos: S.tecnicos.map(x => x.id === tecnico.id ? { ...x, categoria_laboral } : x) });
+    toast('Categoría laboral actualizada', 'ok');
+  }
+
   /* volver una fila al valor que calcula la aplicación */
   async function volverAlCuadro(trabajoId) {
     await guardarItem(trabajoId, { pago: null, minutos: null });
@@ -7707,10 +7825,16 @@ function Productividad() {
             onChange=${e => setTecnicoId(Number(e.target.value))}>
             ${tecnicos.map(t => html`<option value=${t.id}>${t.nombre}</option>`)}
           </select></label>
-        ${tecnico && (catTrab
-          ? html`<span class="et azul" title="De acá sale el cuadro de valores que se le aplica">
-              ${rotCategoriaTrabajador(catTrab)}</span>`
-          : html`<span class="et ambar" title="No tiene categoría laboral asignada (Admin → Técnicos): se le aplica el cuadro 'sin categoría' del mes, si lo hay.">Sin categoría laboral</span>`)}
+        ${tecnico && html`<label class="fila mini" style="gap:5px">
+          <span title="De acá sale qué cuadro de valores se le aplica. Se puede corregir acá mismo, sin ir a Admin → Técnicos.">
+            Categoría laboral</span>
+          <select style=${'width:auto' + (catTrab ? '' : ';background:var(--et-ambar);color:var(--et-ambar-t)')}
+            disabled=${!editable} value=${catTrab || ''}
+            title=${catTrab ? '' : "Sin categoría asignada: se le aplica el cuadro 'sin categoría' del mes, si lo hay."}
+            onChange=${e => cambiarCategoriaAca(e.target.value || null)}>
+            <option value="">Sin definir</option>
+            ${CATEGORIAS_TRABAJADOR.map(c => html`<option value=${c.id}>${c.rot}</option>`)}
+          </select></label>`}
         <div class="fila" style="margin-left:auto">
           <button class="btn sec chico" onClick=${() => setVerCuadro(true)}>Valores del mes</button>
           <button class="btn sec chico" onClick=${exportar}>Exportar</button>
@@ -7743,11 +7867,11 @@ function Productividad() {
       <div class="panel-cuerpo" style="padding-top:0">
         <div class="rejilla dos">
           <label class="campo"><span>Productividad semana planta</span>
-            <textarea rows="2" value=${texto.semana_planta}
+            <textarea rows="2" value=${texto.semana_planta} disabled=${!editable}
               onChange=${e => guardarTexto({ semana_planta: e.target.value })}
               placeholder="Por ejemplo: *Actitudinal 0%  *Productividad 73%  *Presentismo 100%" /></label>
           <label class="campo"><span>Bono 0 garantías de service</span>
-            <textarea rows="2" value=${texto.bono_garantias}
+            <textarea rows="2" value=${texto.bono_garantias} disabled=${!editable}
               onChange=${e => guardarTexto({ bono_garantias: e.target.value })}
               placeholder="Por ejemplo: $0" /></label>
         </div>
@@ -7787,19 +7911,19 @@ function Productividad() {
             <td class="der">${fecha(f.t.fecha_visita)}</td>
             <td>${f.t.tecnicos}</td>
             <td class="num p-min">
-              <input type="number" step="1" value=${f.minutos}
+              <input type="number" step="1" value=${f.minutos} disabled=${!editable}
                 title=${f.minutosAmano ? 'Corregido a mano' : `Sale de ${f.t.horas_mo || 0} h de mano de obra`}
                 class=${'celda' + (f.minutosAmano ? ' amano' : '')}
                 onChange=${e => guardarItem(f.t.id, { minutos: e.target.value === ''
                   ? null : Number(e.target.value) })} />
               <span class="solo-impresion">${(f.minutos || 0).toLocaleString('es-AR')}</span></td>
             <td class="num">
-              <input type="text" inputMode="numeric" value=${plata(f.pago)}
+              <input type="text" inputMode="numeric" value=${plata(f.pago)} disabled=${!editable}
                 title=${f.pagoAmano ? `Corregido a mano. El cálculo daba ${plata(f.sugerido)}`
                   : explicarPago(f, valorMinuto)}
                 class=${'celda' + (f.pagoAmano ? ' amano' : '')}
                 onChange=${e => guardarItem(f.t.id, { pago: soloNumero(e.target.value) })} />
-              ${(f.pagoAmano || f.minutosAmano) && html`<button class="btn sec chico volver no-imprimir"
+              ${editable && (f.pagoAmano || f.minutosAmano) && html`<button class="btn sec chico volver no-imprimir"
                 title=${`Corregido a mano. Volver al valor calculado (${plata(f.sugerido)}).`}
                 onClick=${() => volverAlCuadro(f.t.id)}>↺</button>`}
               <span class="solo-impresion">${plata(f.pago)}</span></td>
@@ -7822,7 +7946,7 @@ function Productividad() {
       <${Deslizador} para=${caja} />
     </div>
 
-    ${verCuadro && html`<${CuadroValores} periodo=${periodo} datos=${datos}
+    ${verCuadro && html`<${CuadroValores} periodo=${periodo} datos=${datos} editable=${editable}
       alCerrar=${() => setVerCuadro(false)} alGuardar=${recargar} />`}
   </div>`;
 }
@@ -7832,7 +7956,7 @@ function Productividad() {
    Es lo que él actualiza mes a mes. Se puede copiar del mes anterior
    para no tener que escribir los doce números de nuevo.
    ===================================================================== */
-function CuadroValores({ periodo, datos, alCerrar, alGuardar }) {
+function CuadroValores({ periodo, datos, alCerrar, alGuardar, editable }) {
   /* Un juego de valores -- minuto y cuadro de tramos -- por cada categoría
      laboral (sql/42_categoria_trabajador_productividad.sql), más uno
      "Sin categoría" para los técnicos que todavía no tienen una asignada
@@ -7946,7 +8070,7 @@ function CuadroValores({ periodo, datos, alCerrar, alGuardar }) {
       <div class="aviso" style="margin-bottom:10px">
         <label class="fila" style="gap:8px;align-items:center">
           <b>Valor del minuto</b>
-          <input type="number" step="0.01" style="width:130px;text-align:right"
+          <input type="number" step="0.01" style="width:130px;text-align:right" disabled=${!editable}
             value=${minutos[cc.id]}
             onInput=${e => setMinutos(m => ({ ...m, [cc.id]: e.target.value }))} />
           <span class="mini">${minutos[cc.id] && Number(minutos[cc.id]) > 0
@@ -7961,7 +8085,7 @@ function CuadroValores({ periodo, datos, alCerrar, alGuardar }) {
             ${PROD_CATEGORIAS.filter(c => c.id !== 'sin_pago').map(c => html`<tr key=${c.id}>
               <td><b>${c.rot}</b></td>
               ${PROD_TRAMOS.map(t => html`<td class="num">
-                <input type="number" step="1" style="width:110px;text-align:right"
+                <input type="number" step="1" style="width:110px;text-align:right" disabled=${!editable}
                   value=${vals[cc.id + '|' + c.id + '|' + t.id]}
                   onInput=${e => setVals(v => ({ ...v, [cc.id + '|' + c.id + '|' + t.id]: e.target.value }))} />
               </td>`)}
@@ -7980,7 +8104,7 @@ function CuadroValores({ periodo, datos, alCerrar, alGuardar }) {
           <tbody>
             ${tipos.map(tp => html`<tr key=${tp}>
               <td>${tp}</td>
-              <td><select style="width:auto" value=${cats[tp] || 'sin_pago'}
+              <td><select style="width:auto" value=${cats[tp] || 'sin_pago'} disabled=${!editable}
                 onChange=${e => setCats(c => ({ ...c, [tp]: e.target.value }))}>
                 ${PROD_CATEGORIAS.map(c => html`<option value=${c.id}>${c.rot}</option>`)}
               </select></td>
@@ -7993,11 +8117,13 @@ function CuadroValores({ periodo, datos, alCerrar, alGuardar }) {
     </details>
 
     <div class="fila" style="justify-content:space-between;margin-top:14px">
-      <button class="btn sec" onClick=${copiarDelMesAnterior}>Copiar del mes anterior</button>
+      ${editable
+        ? html`<button class="btn sec" onClick=${copiarDelMesAnterior}>Copiar del mes anterior</button>`
+        : html`<span class="mini">Sólo el administrador puede corregir estos valores.</span>`}
       <div class="fila">
-        <button class="btn sec" onClick=${alCerrar}>Cancelar</button>
-        <button class="btn" disabled=${guardando} onClick=${guardar}>
-          ${guardando ? 'Guardando…' : 'Guardar'}</button>
+        <button class="btn sec" onClick=${alCerrar}>${editable ? 'Cancelar' : 'Cerrar'}</button>
+        ${editable && html`<button class="btn" disabled=${guardando} onClick=${guardar}>
+          ${guardando ? 'Guardando…' : 'Guardar'}</button>`}
       </div>
     </div>
   <//>`;
@@ -8480,7 +8606,9 @@ function Medidor({ rot, parte, total, tono = 1, detalle }) {
    lo que importa es hace cuánto que no se le ofrece o realiza un
    mantenimiento. Organizado por provincia, para saber a quién conviene
    ofrecerle uno.
-   Sólo lo ven Augusto y Mateo (puedeOfertar(): admin y carga).
+   Lo ven Augusto, Mateo y el visualizador general (puedeOfertar(): admin,
+   carga y lectura) -- éste último sólo para mirar, igual que el resto de
+   la aplicación.
    ===================================================================== */
 const MESES_SIN_ASISTENCIA = 11;
 /* Únicos tipos de pedido que cuentan como "asistencia" para este módulo
@@ -8660,9 +8788,10 @@ function Tablero() {
   const anios = useMemo(() => [...new Set(s.trabajos.map(t => String(t.fecha_visita || '').slice(0, 4))
     .filter(a => a.length === 4))].sort().reverse(), [s.trabajos]);
   const [anio, setAnio] = useState(() => String(new Date().getFullYear()));
-  /* Carga (Mateo) entra al tablero con acceso completo -- incluidos los
-     importes de facturación -- salvo el último apartado ("Cómo va la
-     cobranza"), que queda sólo para el administrador. */
+  /* Carga (Mateo) y el visualizador general entran al tablero con acceso
+     completo -- incluidos los importes de facturación -- salvo el último
+     apartado ("Cómo va la cobranza"), que queda sólo para el
+     administrador. */
   const verCobranza = esAdmin();
 
   const delAnio = useMemo(() => s.trabajos.filter(t =>
@@ -10158,8 +10287,9 @@ function Admin() {
           <thead><tr><th>Rol</th><th>Qué puede hacer</th></tr></thead>
           <tbody>
             <tr><td><b>Administrador</b></td><td class="mini" style="white-space:normal">
-              Todo: cargar, editar, borrar, administrar usuarios, listas y precios.
-              Es el único que ve el Tablero y la Productividad de los técnicos.</td></tr>
+              Todo: cargar, editar, borrar, administrar usuarios, listas y precios. Es el único,
+              junto con el visualizador general, que ve el Tablero y la Productividad de los técnicos
+              -- pero el único que puede corregir el cuadro de valores de Productividad.</td></tr>
             <tr><td><b>Oficina</b></td><td class="mini" style="white-space:normal">
               Todo el trabajo diario: registro, giras, cobranza, clientes, equipos y precios. No administra usuarios.</td></tr>
             <tr><td><b>Carga y giras</b></td><td class="mini" style="white-space:normal">
@@ -10169,8 +10299,8 @@ function Admin() {
               En Registro de Service y Cobranza: precio, facturación, cobro, observaciones del servicio,
               comentarios internos y de cobranza, y el cierre del trabajo. No modifica la planificación.</td></tr>
             <tr><td><b>Visualizador general</b></td><td class="mini" style="white-space:normal">
-              Ve y exporta todos los módulos —registro, giras, repuestos, cobranza, clientes y equipos—
-              sin poder modificar absolutamente nada.</td></tr>
+              Ve y exporta todos los módulos -- incluidos el Tablero y la Productividad de los
+              técnicos -- menos Administración, sin poder modificar absolutamente nada.</td></tr>
             <tr><td><b>Consulta</b></td><td class="mini" style="white-space:normal">
               Sólo el Registro de Service, con los datos del equipo, del cliente, las observaciones y
               los comentarios. No ve precios ni cobranza, y no puede modificar nada. Entra con su
@@ -10636,9 +10766,15 @@ const VISTAS = [
      caso; los importes no los ve (puedeMontos() los apaga uno por uno). */
   ['cobranza',  'Cobranza',             () => html`<${Cobranza} />`,  ['admin', 'oficina', 'cobranza', 'carga', 'lectura']],
   ['encuestas', 'Encuestas',            () => html`<${Encuestas} />`, ['admin', 'oficina', 'carga', 'lectura']],
-  ['productividad', 'Productividad',    () => html`<${Productividad} />`, ['admin']],
-  ['ofertar',   'Elevadores a ofertar', () => html`<${ElevadoresAOfertar} />`, ['admin', 'carga']],
-  ['tablero',   'Tablero',              () => html`<${Tablero} />`,   ['admin', 'carga']],
+  /* Productividad, Ofertar y Tablero eran los únicos módulos que el
+     visualizador general ("lectura") no veía -- quedaban afuera porque
+     antes sólo entraban admin/carga. Ahora que "lectura" entra también
+     acá, cada pantalla se encarga de que, aunque vea todo, no pueda
+     tocar nada (ver editable=esAdmin() en Productividad; Ofertar y
+     Tablero ya eran de sólo lectura para cualquiera que entrase). */
+  ['productividad', 'Productividad',    () => html`<${Productividad} />`, ['admin', 'lectura']],
+  ['ofertar',   'Elevadores a ofertar', () => html`<${ElevadoresAOfertar} />`, ['admin', 'carga', 'lectura']],
+  ['tablero',   'Tablero',              () => html`<${Tablero} />`,   ['admin', 'carga', 'lectura']],
   /* Clientes, equipos y el registro de instalaciones en una sola pantalla
      (antes eran dos módulos separados: "Clientes y equipos" e
      "Instalaciones"). La ve cualquier rol, incluido consulta (sql/37).
