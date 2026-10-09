@@ -3800,9 +3800,11 @@ function Trabajos() {
         t.sin_sincronizar ? html`<span class="et gris" style="margin-left:4px"
           title="Todavía sin subir: se sube solo cuando vuelva internet">⟳</span>` : null}</td>` },
     /* Orden de trabajo (sql/45_orden_de_trabajo.sql): un código propio para
-       trazabilidad, numerado solo al crear el trabajo y que no se puede
-       editar a mano -- a diferencia del N° de llamada, que es el número de
-       llamada del cliente y sí se puede corregir. */
+       trazabilidad, numerado solo al crear el trabajo. Sólo el administrador
+       lo puede corregir a mano (en la ficha), para algún caso excepcional:
+       lo normal es no tocarlo, a diferencia del N° de llamada -- el número
+       de llamada del cliente -- que cualquiera con acceso al servicio
+       puede corregir. */
     { id: 'n_ot', rot: 'N° OT', campo: 'n_ot', claseTh: 'c-ot',
       td: t => html`<td class="corta" title="Orden de trabajo, para trazabilidad"><b>${t.n_ot || '—'}</b></td>` },
     { id: 'tipo_pedido', rot: 'Pedido', campo: 'tipo_pedido', claseTh: 'c-pedido',
@@ -4298,7 +4300,7 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
     let cuerpo = {};
     try {
       const datos = { ...b, ...cobranzaViva(), ...(extra || {}) };
-      const campos = ['correlativo','n_llamada','cliente_id','equipo_id','tipo_pedido','tipo_servicio',
+      const campos = ['correlativo','n_llamada','n_ot','cliente_id','equipo_id','tipo_pedido','tipo_servicio',
         'prioridad','estado','cierre','fecha_pedido','fecha_visita','gira_id','orden_gira',
         'encuesta','horas_mo','obs_servicio','comentarios','monto_trabajo','monto_trabajo_condicion',
         'precio_sin_iva','facturado',
@@ -4495,9 +4497,9 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
                 alCambiar=${v => c('prioridad', v)} disabled=${!edServ} />
               <${Txt} rot="N° de llamada" valor=${b.n_llamada} alCambiar=${v => c('n_llamada', v)}
                 disabled=${!edServ} placeholder=${nuevo ? 'automático' : ''} />
-              <${Txt} rot="N° OT" valor=${b.n_ot} alCambiar=${() => {}} disabled=${true}
+              <${Txt} rot="N° OT" valor=${b.n_ot} alCambiar=${v => c('n_ot', v)} disabled=${!esAdmin()}
                 placeholder=${nuevo ? 'se asigna al crear' : ''}
-                titulo="Orden de trabajo: se numera sola al crear el trabajo y no se puede corregir a mano -- es el código para hacer trazabilidad." />
+                titulo="Orden de trabajo: se numera sola al crear el trabajo. Sólo el administrador puede corregirla a mano, para algún caso excepcional -- es el código para hacer trazabilidad, así que lo normal es no tocarla." />
               <${Txt} rot="Fecha del pedido" tipo="date" valor=${b.fecha_pedido}
                 alCambiar=${v => c('fecha_pedido', v)} disabled=${!edServ} />
             </div>
