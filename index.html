@@ -1621,15 +1621,25 @@ const CIERRE_PENDIENTE_COBRANZA = 'PENDIENTE COBRANZA';
 /* "TRABAJO PENDIENTE": un cuarto estado de cierre. Es para un trabajo que
    se marcó CUMPLIDO pero en el que, en rigor, todavía queda algo por
    hacer -- hay que programar otra visita para dejar el equipo funcionando
-   -- así que no corresponde ni cobrarlo ni facturarlo todavía. Igual que
-   PENDIENTE COBRANZA, saca al trabajo de "cumplidos sin cerrar" (no es
-   algo que Administración tenga que perseguir), pero a diferencia de
-   aquél no es un tema de plata: es un tema de servicio sin terminar, así
-   que se marca con el cartel más fuerte de toda la grilla. */
+   -- así que no corresponde ni cobrarlo ni facturarlo todavía.
+
+   A diferencia de PENDIENTE COBRANZA -- que sí es nomás un tema de plata,
+   y por eso a ése sí lo saca estaAbierto() de "cumplidos sin cerrar": no
+   hay nada más que perseguir del lado del servicio -- un trabajo
+   "trabajo pendiente" sigue debiendo una visita. Así que para Augusto
+   tiene que seguir contando como ABIERTO en todos lados (el tablero,
+   "Cumplidos sin cerrar" de Cobranza y del Registro de Service, el aviso
+   de deuda del cliente al coordinar una visita nueva): lo único que
+   cambia es el cartel, mucho más fuerte (ver tonoDeFila() y MarcaCierre,
+   en app/20_ui.js), para que salte a la vista que en este caso puntual lo
+   que falta no es administrativo sino volver a visitar al cliente. */
 const CIERRE_TRABAJO_PENDIENTE = 'TRABAJO PENDIENTE';
+/* CUMPLIDO y sin cerrar administrativamente todavía. "TRABAJO PENDIENTE"
+   cuenta como abierto (ver el comentario de arriba): lo único que de
+   verdad saca a un trabajo de esta cuenta es CERRADO o PENDIENTE
+   COBRANZA. */
 function estaAbierto(t) {
-  return t.estado === 'CUMPLIDO' && t.cierre !== 'CERRADO' && t.cierre !== CIERRE_PENDIENTE_COBRANZA
-    && t.cierre !== CIERRE_TRABAJO_PENDIENTE;
+  return t.estado === 'CUMPLIDO' && t.cierre !== 'CERRADO' && t.cierre !== CIERRE_PENDIENTE_COBRANZA;
 }
 
 /* ---------------------------------------------------------------------
@@ -3623,7 +3633,13 @@ function filtrar(trabajos, f) {
   return trabajos.filter(r => {
     if (f.abiertos && !ABIERTOS.includes(r.estado)) return false;
     if (f.estado && r.estado !== f.estado) return false;
-    if (f.cierre && cierreQueCorresponde(r) !== f.cierre) return false;
+    // "ABIERTO" en este filtro (y en el botón "⚠ sin cerrar", más abajo) es
+    // el mismo criterio que estaAbierto(): incluye también TRABAJO
+    // PENDIENTE, que cuenta como abierto aunque tenga su propio cartel.
+    // Para ver SÓLO lo marcado como trabajo pendiente está la opción
+    // puntual "TRABAJO PENDIENTE" de la lista.
+    if (f.cierre === 'ABIERTO') { if (!estaAbierto(r)) return false; }
+    else if (f.cierre && cierreQueCorresponde(r) !== f.cierre) return false;
     if (f.prioridad && r.prioridad !== f.prioridad) return false;
     if (f.tipo_pedido && r.tipo_pedido !== f.tipo_pedido) return false;
     if (f.tipo_servicio && r.tipo_servicio !== f.tipo_servicio) return false;
@@ -4004,7 +4020,14 @@ function Trabajos() {
                        // la facturación EN CURSO ya se está gestionando: no se
                        // pinta amarilla igual que lo que todavía no se tocó
                        (porHacer(t) || (t.estado === 'CUMPLIDO' && faltaFacturacion(t) && t.facturado !== 'EN CURSO')) ? 'por-hacer' : '',
-                       verPlata && estaAbierto(t) && !faltaFacturacion(t) ? 'sin-cerrar' : '',
+                       // ojo: no para TRABAJO PENDIENTE -- ya tiene su propio
+                       // tono "urgente" (fondo y borde rojos armados en la
+                       // fila completa); si además se le agregara esta clase,
+                       // el fondo rosado de "sin-cerrar" le tapa el de
+                       // "urgente" en cada celda y la fila se ve más floja,
+                       // no más fuerte.
+                       verPlata && estaAbierto(t) && !faltaFacturacion(t)
+                         && t.cierre !== CIERRE_TRABAJO_PENDIENTE ? 'sin-cerrar' : '',
                        String(s.destacado) === String(t.id) ? 'recien' : '',
                        corteDeSemana.has(t.id) ? 'otra-semana' : '',
                        t.sin_sincronizar ? 'en-cola' : ''].filter(Boolean).join(' ')}
@@ -4440,7 +4463,15 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
             <button class="btn" onClick=${() => setAvisoCobranza(false)}>Entendido</button>
           </div>
         <//>`}
-        ${puedeVerPlata() && !nuevo && b.estado === 'CUMPLIDO' && estaAbierto(b2) && html`
+        ${puedeVerPlata() && !nuevo && b.estado === 'CUMPLIDO'
+          // "ABIERTO" literal a propósito, no estaAbierto(): TRABAJO
+          // PENDIENTE también cuenta como abierto para el resto de la
+          // aplicación (tablero, Cobranza, Registro de Service), pero acá
+          // abajo ya tiene su propio aviso con su propio cartel (el bloque
+          // "CERRADO, PENDIENTE COBRANZA o TRABAJO PENDIENTE" que sigue) --
+          // si este aviso usara estaAbierto() se mostrarían los dos juntos,
+          // uno encima del otro, para el mismo trabajo.
+          && b2.cierre === 'ABIERTO' && html`
           <div class="aviso-cierre">
             <div class="crece">
               <b>⚠ Trabajo cumplido pero ABIERTO</b>
