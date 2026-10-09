@@ -5902,24 +5902,40 @@ function tamañoRecomendado(paradas, columnas = COLS_HOJA) {
 function HojaRuta({ gira, paradas, alCerrar }) {
   const s = useS();
   const [corte, setCorte] = useState('');   // '' | dia | tecnico
+  const tec = s.tecnicos.find(t => t.id === gira.tecnico_id);
+  const tec2 = s.tecnicos.find(t => t.id === gira.tecnico2_id);
+  /* Técnico a imprimir: '' = los dos, o el id de uno de los dos técnicos de
+     la gira (gira.tecnico_id / tecnico2_id) -- para entregarle a cada uno
+     SÓLO su propia planilla, sin los trabajos del otro. El selector sólo
+     se muestra si la gira tiene los dos técnicos cargados (si tiene uno
+     solo, no hay nada para elegir). Compara contra el técnico que cada
+     trabajo tiene asignado en SU PROPIA ficha (tecnico_ids, el mismo dato
+     que agrupa "separar por… técnico" más abajo) -- no contra los dos
+     técnicos de la gira, que son otra cosa (quién integra la semana, no
+     quién hace cada trabajo puntual). Un trabajo sin ningún técnico propio
+     cargado se muestra en los dos filtros (nunca se le "pierde" un trabajo
+     a nadie por no estar etiquetado). */
+  const [tecFiltro, setTecFiltro] = useState('');
+  const paradasDelTecnico = useMemo(() => !tecFiltro ? paradas
+    : paradas.filter(t => !(t.tecnico_ids || []).length
+        || t.tecnico_ids.some(id => String(id) === String(tecFiltro))),
+    [paradas, tecFiltro]);
   /* Día a imprimir: '' = toda la semana, o una fecha puntual (o "Sin fecha")
      para sacar sólo la hoja de ruta de ese día -- por ejemplo, para
      entregarle al técnico nada más que lo de hoy. */
   const [diaFiltro, setDiaFiltro] = useState('');
-  const diasConTrabajo = useMemo(() => [...new Set(paradas.map(t => t.fecha_visita || 'Sin fecha'))]
-    .sort((a, b) => a.localeCompare(b, 'es')), [paradas]);
+  const diasConTrabajo = useMemo(() => [...new Set(paradasDelTecnico.map(t => t.fecha_visita || 'Sin fecha'))]
+    .sort((a, b) => a.localeCompare(b, 'es')), [paradasDelTecnico]);
   const etiquetasDias = useMemo(() => {
     const m = {};
     diasConTrabajo.forEach(d => { m[d] = d === 'Sin fecha' ? 'Sin fecha asignada' : fechaLarga(d); });
     return m;
   }, [diasConTrabajo]);
   const paradasDelDia = useMemo(() => diaFiltro
-    ? paradas.filter(t => (t.fecha_visita || 'Sin fecha') === diaFiltro)
-    : paradas, [paradas, diaFiltro]);
+    ? paradasDelTecnico.filter(t => (t.fecha_visita || 'Sin fecha') === diaFiltro)
+    : paradasDelTecnico, [paradasDelTecnico, diaFiltro]);
   const recomendado = useMemo(() => tamañoRecomendado(paradasDelDia), [paradasDelDia]);
   const [tam, setTam] = useState(recomendado);   // tamaño de letra de la planilla
-  const tec = s.tecnicos.find(t => t.id === gira.tecnico_id);
-  const tec2 = s.tecnicos.find(t => t.id === gira.tecnico2_id);
   useEffect(() => {
     document.body.classList.add('imprimiendo');
     return () => document.body.classList.remove('imprimiendo');
@@ -5971,6 +5987,14 @@ function HojaRuta({ gira, paradas, alCerrar }) {
      navegador la vuelva a imprimir sola junto con los títulos de columna:
      es el mismo mecanismo por el que ya se repiten los títulos de columna. */
   const subtituloDia = diaFiltro ? etiquetasDias[diaFiltro] : null;
+  /* Si se filtró por uno de los dos técnicos, el encabezado (impreso y en
+     pantalla) muestra sólo ESE técnico -- no tiene sentido que la hoja de
+     uno incluya también el nombre del otro. */
+  const tecUnico = tecFiltro ? (String(gira.tecnico_id) === tecFiltro ? tec : tec2) : null;
+  const bloqueTecnico = tecFiltro
+    ? html`<div><b>Técnico:</b> ${tecUnico ? tecUnico.nombre : '—'}</div>`
+    : html`<${Fragment}><div><b>Técnico${tec2 ? ' 1' : ''}:</b> ${tec ? tec.nombre : '—'}</div>
+        ${tec2 && html`<div><b>Técnico 2:</b> ${tec2.nombre}</div>`}<//>`;
 
   const filaTitulo = html`<tr class="fila-titulo-planilla">
     <th colspan=${COLS_HOJA.length}>
@@ -5982,8 +6006,7 @@ function HojaRuta({ gira, paradas, alCerrar }) {
           ${subtituloDia && html`<div class="mini"><b>Día: ${subtituloDia}</b></div>`}
         </div>
         <div class="mini der">
-          <div><b>Técnico${tec2 ? ' 1' : ''}:</b> ${tec ? tec.nombre : '—'}</div>
-          ${tec2 && html`<div><b>Técnico 2:</b> ${tec2.nombre}</div>`}
+          ${bloqueTecnico}
           <div><b>Vehículo:</b> ${gira.vehiculo || '—'}</div>
           <div><b>Código de viaje:</b> ${gira.codigo_viaje || '—'}</div>
           <div><b>Viáticos entregados:</b> ${plata(gira.viaticos) || '—'}</div>
@@ -5995,7 +6018,14 @@ function HojaRuta({ gira, paradas, alCerrar }) {
   return html`<div class="fondo" style="justify-content:center;align-items:flex-start;padding:14px;overflow:auto">
     <div class="panel hoja-impresion" style="width:100%;max-width:1300px;background:var(--papel)">
       <div class="panel-cab no-imprimir">
-        <h2>Planilla de trabajos — semana ${gira.n_semana || ''}${subtituloDia ? ' · ' + subtituloDia : ''}</h2>
+        <h2>Planilla de trabajos — semana ${gira.n_semana || ''}${tecUnico ? ' · ' + tecUnico.nombre : ''}${subtituloDia ? ' · ' + subtituloDia : ''}</h2>
+        ${!!(gira.tecnico_id && gira.tecnico2_id) && html`<${Fragment}>
+          <${Sel} valor=${tecFiltro} opts=${[String(gira.tecnico_id), String(gira.tecnico2_id)]}
+            etiquetas=${{ [String(gira.tecnico_id)]: tec ? tec.nombre : 'Técnico 1',
+                           [String(gira.tecnico2_id)]: tec2 ? tec2.nombre : 'Técnico 2' }}
+            vacio="Los dos técnicos" alCambiar=${v => setTecFiltro(v || '')} />
+          <span class="mini">técnico a imprimir</span>
+        <//>`}
         <${Sel} valor=${diaFiltro} opts=${diasConTrabajo} etiquetas=${etiquetasDias} vacio="Toda la semana"
           alCambiar=${v => setDiaFiltro(v || '')} />
         <span class="mini">día a imprimir</span>
@@ -6023,8 +6053,7 @@ function HojaRuta({ gira, paradas, alCerrar }) {
             ${subtituloDia && html`<div class="mini"><b>Día: ${subtituloDia}</b></div>`}
           </div>
           <div class="mini der">
-            <div><b>Técnico${tec2 ? ' 1' : ''}:</b> ${tec ? tec.nombre : '—'}</div>
-            ${tec2 && html`<div><b>Técnico 2:</b> ${tec2.nombre}</div>`}
+            ${bloqueTecnico}
             <div><b>Vehículo:</b> ${gira.vehiculo || '—'}</div>
             <div><b>Código de viaje:</b> ${gira.codigo_viaje || '—'}</div>
             <div><b>Viáticos entregados:</b> ${plata(gira.viaticos) || '—'}</div>
@@ -6034,7 +6063,9 @@ function HojaRuta({ gira, paradas, alCerrar }) {
           encabezado se repite solo al principio de cada página, junto con los títulos de columna.</div>
 
         ${!paradasDelDia.length ? html`<div class="vacio">
-          ${diaFiltro ? 'Ese día no tiene trabajos asignados en esta gira.' : 'Esta gira todavía no tiene trabajos asignados.'}
+          ${diaFiltro ? 'Ese día no tiene trabajos asignados en esta gira.'
+            : tecFiltro ? `${tecUnico ? tecUnico.nombre : 'Este técnico'} no tiene trabajos asignados en esta gira.`
+            : 'Esta gira todavía no tiene trabajos asignados.'}
         </div>` : grupos.map(([dia, lista]) => html`<div key=${dia || 'todo'} style="margin-bottom:14px">
           ${dia && html`<div class="titulo-dia">${corte === 'tecnico'
             ? dia
