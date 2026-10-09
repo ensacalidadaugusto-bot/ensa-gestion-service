@@ -315,6 +315,19 @@ table.grilla.registro tbody tr.tono-abierto{--canto:var(--error)}
    fila y canto), para que salte a la vista como algo pendiente de completar,
    distinto del rojo que es "ya está todo definido y sólo falta cerrar" */
 table.grilla.registro tbody tr.tono-sin-facturar{--canto:var(--fila-hacer-b)}
+/* sin NINGÚN dato de facturación todavía (abierto): además del canto
+   amarillo, toda la tarjeta queda con un contorno rojo, para que salte a
+   la vista que a este caso todavía no se le tocó nada */
+table.grilla.registro tbody tr.tono-sin-facturar td{border-top-color:var(--error);border-bottom-color:var(--error)}
+table.grilla.registro tbody tr.tono-sin-facturar td:first-child{border-left-color:var(--error)}
+table.grilla.registro tbody tr.tono-sin-facturar td:last-child{border-right-color:var(--error)}
+table.grilla.registro tbody tr.tono-sin-facturar:hover td{border-top-color:var(--error);border-bottom-color:var(--error)}
+table.grilla.registro tbody tr.tono-sin-facturar:hover td:last-child{border-right-color:var(--error)}
+/* facturación YA en curso: alguien lo está gestionando, así que no es lo
+   mismo que "sin-facturar" (nada tocado todavía) y no se pinta amarillo
+   -- un canto azul, el mismo color que "En curso" en el gráfico de
+   Cobranza */
+table.grilla.registro tbody tr.tono-facturando{--canto:var(--sv-1)}
 /* cerrado, pero con un pago viejo pendiente: ni "hecho" (verde) ni "urgente
    por cerrar" (rojo) -- un tercer color, más discreto, para no confundirlo
    con el trabajo que sí necesita atención hoy */
@@ -571,15 +584,22 @@ legend{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--a
 /* gráficos */
 .svg-grafico{width:100%;height:auto;display:block;overflow:visible}
 .svg-grafico .eje{font-size:10px;fill:var(--suave)}
+/* el valor escrito adentro de un tramo de una barra apilada: blanco con un
+   halo oscuro (en vez de un color fijo de texto) para que se lea igual
+   sobre cualquiera de los cinco colores de la paleta, en los dos temas */
+.svg-grafico .valor-barra{font-size:10px;font-weight:700;fill:#fff;
+  paint-order:stroke;stroke:rgba(0,0,0,.45);stroke-width:2.5px;stroke-linejoin:round;
+  pointer-events:none;font-variant-numeric:tabular-nums}
 .pie-grafico{display:flex;justify-content:space-between;align-items:center;gap:10px;
   margin-top:7px;font-size:12px;flex-wrap:wrap}
 .barras{display:flex;flex-direction:column;gap:7px}
-.barra-item{display:grid;grid-template-columns:minmax(96px,150px) 1fr 68px;align-items:center;
+.barra-item{display:grid;grid-template-columns:minmax(96px,150px) 1fr minmax(68px,108px);align-items:center;
   gap:9px;font-size:12px}
 .barra-item .rotulo{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .barra-item .track{display:block;background:var(--reja);border-radius:4px;height:13px;overflow:hidden}
 .barra-item .fill{display:block;height:100%;background:var(--tono);border-radius:4px}
-.barra-item .valor{font-variant-numeric:tabular-nums;color:var(--texto)}
+.barra-item .valor{font-variant-numeric:tabular-nums;color:var(--texto);white-space:nowrap}
+.barra-item .valor .mini{font-variant-numeric:tabular-nums}
 
 /* semáforo del estado del sistema */
 .luces{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px}
@@ -707,6 +727,21 @@ body.esquina-ocupada .aviso-version{bottom:60px}
   text-transform:uppercase;letter-spacing:.2px;white-space:nowrap}
 .menu-gestion-cli button:hover{background:var(--et-rojo-t);color:#fff}
 .menu-gestion-cli button.act{background:var(--et-rojo-t);color:#fff;box-shadow:inset 0 0 0 2px var(--et-rojo)}
+
+/* Registro de Service: columnas a gusto de cada usuario (ocultarlas o
+   cambiarles el ancho arrastrando el borde). El panel reutiliza
+   .capa-cierre-menu de arriba para cerrarse con un clic afuera. */
+.menu-columnas{position:fixed;z-index:20;background:var(--papel);border:1px solid var(--borde);
+  border-radius:8px;box-shadow:var(--sombra);padding:10px 12px;min-width:250px;
+  max-height:72vh;overflow:auto}
+.menu-columnas label span{font-size:12px}
+/* tirador para arrastrar el ancho: una franja angosta pegada al borde
+   derecho de la columna, adentro del th (que ya recorta con overflow:hidden).
+   No hace falta position:relative en el th: position:sticky (la base de
+   table.grilla th) ya lo deja como contenedor de posicionamiento para este
+   hijo absolute, sin tocar el comportamiento de cabecera pegajosa. */
+.resize-handle{position:absolute;top:0;right:0;bottom:0;width:7px;cursor:col-resize;z-index:5}
+.resize-handle:hover,.resize-handle:active{background:color-mix(in srgb, var(--texto) 20%, transparent)}
 .linea-tiempo{border-left:2px solid var(--borde);margin-left:6px;padding-left:12px}
 .linea-tiempo .ev{margin-bottom:9px;position:relative;font-size:12px}
 .linea-tiempo .ev:before{content:"";position:absolute;left:-17px;top:5px;width:8px;height:8px;border-radius:50%;background:var(--acento)}
@@ -1636,14 +1671,19 @@ function porHacer(t) { return t.estado === 'PENDIENTE' || t.estado === 'PROGRAMA
      rojo     — hecho, la facturación ya está definida, pero falta cerrar
                 (cargar las observaciones del servicio)
      amarillo — todavía por hacer (PENDIENTE/PROGRAMADO)
-     azul     — en revisión o a reprogramar
-     gris     — cancelado */
+     azul     — en revisión o a reprogramar, o facturación ya en curso (se
+                está gestionando, no es lo mismo que no se haya tocado nada)
+     gris     — cancelado
+   "sin-facturar" (amarillo) queda reservado para cuando no se cargó
+   NINGÚN dato de facturación todavía: "en curso" ya significa que alguien
+   lo está gestionando, así que tiene su propio tono para no mezclarlo con
+   lo que está realmente sin tocar. */
 function tonoDeFila(t) {
   if (t.estado === 'CANCELA VISITA') return 'gris';
   if (t.estado === 'CUMPLIDO') {
     if (t.cierre === 'CERRADO') return 'listo';
     if (t.cierre === CIERRE_PENDIENTE_COBRANZA) return 'pendiente-cobranza';
-    if (faltaFacturacion(t)) return 'sin-facturar';
+    if (faltaFacturacion(t)) return t.facturado === 'EN CURSO' ? 'facturando' : 'sin-facturar';
     return 'abierto';
   }
   if (porHacer(t)) return 'hacer';
@@ -3498,6 +3538,26 @@ const FECHAS_FILTRO = [
   ['fecha_factura', 'Fecha de factura'],
   ['fecha_pago', 'Fecha de pago'],
 ];
+/* ---------------------------------------------------------------------
+   COLUMNAS DEL REGISTRO DE SERVICE, A GUSTO DE CADA USUARIO
+   Qué columnas se ven y qué ancho tiene cada una queda guardado en este
+   navegador, por usuario (así si alguien más entra con otro usuario en la
+   misma máquina no hereda la configuración de otro). No es nada que haga
+   falta sincronizar entre dispositivos: es sólo cómo prefiere ver la
+   planilla cada uno en su pantalla.
+   --------------------------------------------------------------------- */
+const CLAVE_PREFS_COLUMNAS = 'registro_cols_';
+function cargarPrefsColumnas(uid) {
+  try {
+    const guardado = JSON.parse(localStorage.getItem(CLAVE_PREFS_COLUMNAS + uid) || 'null');
+    return { ocultas: (guardado && guardado.ocultas) || [], anchos: (guardado && guardado.anchos) || {} };
+  } catch (e) { return { ocultas: [], anchos: {} }; }
+}
+function guardarPrefsColumnas(uid, prefs) {
+  try { localStorage.setItem(CLAVE_PREFS_COLUMNAS + uid, JSON.stringify(prefs)); }
+  catch (e) { /* modo privado o sin espacio: no es crítico, sigue andando sin guardar */ }
+}
+
 /** La fecha con la que se filtra: la elegida y, si está vacía, la que haya */
 function fechaDe(r, campo) {
   const v = r[campo || 'fecha_visita'];
@@ -3549,6 +3609,56 @@ function Trabajos() {
   const caja = useRef(null);            // la caja que se desplaza de costado
   const [borrando, setBorrando] = useState(null);   // trabajo que se está por borrar
   const cambiar = (k, v) => { setF({ ...f, [k]: v }); setTope(250); };
+
+  /* Columnas visibles y sus anchos: a gusto de cada usuario, guardado en
+     este navegador (ver cargarPrefsColumnas/guardarPrefsColumnas arriba). */
+  const uid = (s.usuario && s.usuario.id) || 'anon';
+  const [ocultas, setOcultas] = useState(() => cargarPrefsColumnas(uid).ocultas);
+  const [anchos, setAnchos] = useState(() => cargarPrefsColumnas(uid).anchos);
+  const ocultasRef = useRef(ocultas);
+  const anchosRef = useRef(anchos);
+  const [menuCols, setMenuCols] = useState(null);   // { top, left } del panel "Columnas", o null si está cerrado
+  const resizeRef = useRef(null);
+  useEffect(() => {
+    const p = cargarPrefsColumnas(uid);
+    ocultasRef.current = p.ocultas; anchosRef.current = p.anchos;
+    setOcultas(p.ocultas); setAnchos(p.anchos);
+  }, [uid]);
+  function alternarColumna(id) {
+    const next = ocultasRef.current.includes(id)
+      ? ocultasRef.current.filter(x => x !== id) : [...ocultasRef.current, id];
+    ocultasRef.current = next;
+    setOcultas(next);
+    guardarPrefsColumnas(uid, { ocultas: next, anchos: anchosRef.current });
+  }
+  function restablecerColumnas() {
+    ocultasRef.current = []; anchosRef.current = {};
+    setOcultas([]); setAnchos({});
+    guardarPrefsColumnas(uid, { ocultas: [], anchos: {} });
+  }
+  /** Arrastrar el borde derecho de una columna para achicarla o agrandarla */
+  function iniciarResize(e, id) {
+    e.preventDefault(); e.stopPropagation();
+    const th = e.currentTarget.closest('th');
+    const anchoInicial = (th && th.getBoundingClientRect().width) || anchosRef.current[id] || 120;
+    resizeRef.current = { id, xInicial: e.clientX, anchoInicial };
+    window.addEventListener('mousemove', moverResize);
+    window.addEventListener('mouseup', terminarResize);
+  }
+  function moverResize(e) {
+    const r = resizeRef.current;
+    if (!r) return;
+    const nuevo = Math.max(40, Math.min(520, Math.round(r.anchoInicial + (e.clientX - r.xInicial))));
+    const next = { ...anchosRef.current, [r.id]: nuevo };
+    anchosRef.current = next;
+    setAnchos(next);
+  }
+  function terminarResize() {
+    window.removeEventListener('mousemove', moverResize);
+    window.removeEventListener('mouseup', terminarResize);
+    resizeRef.current = null;
+    guardarPrefsColumnas(uid, { ocultas: ocultasRef.current, anchos: anchosRef.current });
+  }
 
   const filtrados = useMemo(() => ordenar(filtrar(s.trabajos, f), orden), [s.trabajos, f, orden]);
 
@@ -3623,6 +3733,84 @@ function Trabajos() {
     'Cierre', 'Precio sin IVA', 'Facturado', 'Fecha factura', 'Tipo factura', 'CUIT/DNI',
     'Concepto', 'Cobrado', 'Fecha de pago', 'Correo', 'Obs. cobranza'].includes(c.rot));
 
+  /* ---------------------------------------------------------------------
+     Columnas que se pintan en pantalla (distinto de "cols" de arriba, que
+     es sólo para el Excel exportado): cada una trae su propia celda ya
+     armada, tal como se veía antes de poder ocultarlas o cambiarles el
+     ancho. "fija" es la única que no se puede ocultar (N° LL, la columna
+     congelada que identifica la fila). El botón de borrar de la derecha
+     queda aparte, no es una columna configurable.
+     --------------------------------------------------------------------- */
+  const columnasDisponibles = useMemo(() => [
+    { id: 'n_llamada', rot: 'N° LL', campo: 'n_llamada', claseTh: 'congelada c-ll', fija: true,
+      td: t => html`<td class="congelada corta"><b>${t.n_llamada || '#' + t.id}</b>${
+        t.sin_sincronizar ? html`<span class="et gris" style="margin-left:4px"
+          title="Todavía sin subir: se sube solo cuando vuelva internet">⟳</span>` : null}</td>` },
+    { id: 'tipo_pedido', rot: 'Pedido', campo: 'tipo_pedido', claseTh: 'c-pedido',
+      td: t => html`<td class="pedido"><div class="rec">${t.tipo_pedido}</div></td>` },
+    { id: 'n_serie', rot: 'Serie', campo: 'n_serie', claseTh: 'c-serie',
+      td: t => html`<td class="corta">${t.n_serie}</td>` },
+    { id: 'modelo', rot: 'Mod.', campo: 'modelo', claseTh: 'c-modelo',
+      td: t => html`<td class="corta apoyo">${t.modelo}</td>` },
+    { id: 'fecha_instalacion', rot: 'Instal.', campo: 'fecha_instalacion', claseTh: 'c-inst',
+      td: t => html`<td class="fecha apoyo">${fecha(t.fecha_instalacion, 1)}</td>` },
+    { id: 'cliente_nombre', rot: 'Cliente', campo: 'cliente_nombre', claseTh: 'c-cliente corte',
+      td: t => html`<td class="cliente corte" title=${t.cliente_nombre}>
+        <div class="rec">${t.cliente_nombre}</div></td>` },
+    { id: 'direccion', rot: 'Dirección', campo: null, claseTh: 'c-dir',
+      td: t => html`<td class="apoyo" title=${direccionDe(t)}><div class="rec">${direccionDe(t)}</div></td>` },
+    { id: 'ciudad', rot: 'Ciudad y provincia', campo: null, claseTh: 'c-ciudad',
+      td: t => html`<td class="apoyo" title=${ubicacion(t)}><div class="rec">${ubicacion(t)}</div></td>` },
+    { id: 'tipo_servicio', rot: 'Servicio', campo: 'tipo_servicio', claseTh: 'c-serv corte',
+      td: t => html`<td class="corte"><div class="rec">${t.tipo_servicio}</div></td>` },
+    { id: 'prioridad', rot: 'Prior.', campo: 'prioridad', claseTh: 'c-prior',
+      td: t => html`<td class="etq"><${Et} txt=${t.prioridad} mapa=${COLOR_PRIORIDAD} /></td>` },
+    { id: 'estado', rot: 'Estado', campo: 'estado', claseTh: 'c-estado',
+      td: t => html`<td class="etq"><${Et} txt=${t.estado} mapa=${COLOR_ESTADO} /></td>` },
+    ...(verPlata ? [{ id: 'cierre', rot: 'Cierre', campo: 'cierre', claseTh: 'c-cierre',
+      td: t => html`<td class="etq"><${MarcaCierre} t=${t} /></td>` }] : []),
+    { id: 'n_semana', rot: 'Semana', campo: 'n_semana', claseTh: 'c-semana',
+      td: t => html`<td class="corta apoyo">${t.n_semana || ''}</td>` },
+    { id: 'fecha_visita', rot: 'Fecha', campo: 'fecha_visita', claseTh: 'c-fecha',
+      td: t => html`<td class="fecha">${fecha(t.fecha_visita)}${recienInstalado(t)
+        ? html`<div><span class="marca-recien">visita antes del mes</span></div>` : ''}</td>` },
+    { id: 'obs_servicio', rot: 'Observaciones del servicio', campo: null, claseTh: 'c-obs corte',
+      td: t => html`<td class="apoyo corte" title=${t.obs_servicio}><div class="rec">${t.obs_servicio}</div></td>` },
+    { id: 'tecnicos', rot: 'Técnico', campo: 'tecnicos', claseTh: 'c-tec',
+      td: t => html`<td title=${t.tecnicos}><div class="rec">${t.tecnicos}</div></td>` },
+    ...(verPlata ? [
+      { id: 'precio_sin_iva', rot: 'Precio s/IVA', campo: 'precio_sin_iva', claseTh: 'c-precio corte',
+        td: t => html`<td class="num corta corte">${plata(t.precio_sin_iva)}</td>` },
+      /* Facturado: cuando está EN CURSO, se agrega debajo la fecha de
+         factura cargada -- es el dato que importa saber de un vistazo
+         mientras se está tramitando. */
+      { id: 'facturado', rot: 'Facturado', campo: 'facturado', claseTh: 'c-fact',
+        td: t => html`<td class="etq"><${Et} txt=${t.facturado} mapa=${COLOR_COBRO} />
+          ${t.facturado === 'EN CURSO' && t.fecha_factura
+            ? html`<div class="mini apoyo" style="margin-top:3px">${fecha(t.fecha_factura, 1)}</div>` : ''}</td>` },
+      { id: 'cobrado', rot: 'Cobrado', campo: 'cobrado', claseTh: 'c-cob',
+        td: t => html`<td class="etq"><${Et} txt=${t.cobrado} mapa=${COLOR_COBRO} /></td>` },
+    ] : [
+      { id: 'horas_mo', rot: 'Horas', campo: 'horas_mo', claseTh: 'c-horas corte',
+        td: t => html`<td class="num corta corte">${t.horas_mo || ''}</td>` },
+      { id: 'comentarios', rot: 'Comentarios internos', campo: null, claseTh: 'c-coment',
+        td: t => html`<td class="apoyo" title=${t.comentarios}><div class="rec">${t.comentarios || ''}</div></td>` },
+    ]),
+  ], [verPlata]);
+  const columnasVisibles = useMemo(() => columnasDisponibles.filter(c => c.fija || !ocultas.includes(c.id)),
+    [columnasDisponibles, ocultas]);
+  /** Encabezado de una columna: ordena al hacer clic (si tiene campo) y
+      siempre trae su propio tirador para achicarla o agrandarla. */
+  function cabecera(c) {
+    const act = c.campo && orden.campo === c.campo;
+    return html`<th key=${c.id} class=${c.claseTh}
+        onClick=${c.campo ? () => setOrden({ campo: c.campo, asc: act ? !orden.asc : false }) : undefined}>
+      ${c.rot}${act ? (orden.asc ? ' ▲' : ' ▼') : ''}
+      <span class="resize-handle" title="Arrastrar para cambiar el ancho"
+        onMouseDown=${e => iniciarResize(e, c.id)} onClick=${e => e.stopPropagation()}></span>
+    </th>`;
+  }
+
   return html`<div>
     <div class="panel" style="margin-bottom:10px">
       <div class="panel-cab">
@@ -3661,6 +3849,12 @@ function Trabajos() {
           onClick=${() => setF({ ...FILTRO_VACIO, cierre: f.cierre === 'ABIERTO' ? '' : 'ABIERTO' })}>
           ⚠ ${sinCerrar} sin cerrar</button>`}
         <div style="margin-left:auto" class="fila">
+          <button class="btn sec chico" title="Elegir qué columnas mostrar y acomodar sus anchos"
+            onClick=${e => {
+              if (menuCols) return setMenuCols(null);
+              const r = e.currentTarget.getBoundingClientRect();
+              setMenuCols({ top: r.bottom + 4, left: Math.max(8, r.right - 260) });
+            }}>☰ Columnas${ocultas.length ? ` (${ocultas.length} ocultas)` : ''}</button>
           <button class="btn sec chico" title="Qué significa cada color y cada etiqueta de esta grilla"
             onClick=${() => setVerLeyenda(true)}>Referencias</button>
           <button class="btn sec chico" title=${`Descarga en Excel los ${filtrados.length} registros que estás viendo, con toda la información`}
@@ -3727,28 +3921,13 @@ function Trabajos() {
 
     <div class="tabla-caja panel" ref=${caja}>
       <table class="grilla registro">
+        <colgroup>
+          ${columnasVisibles.map(c => html`<col key=${c.id}
+            style=${anchos[c.id] ? `width:${anchos[c.id]}px` : ''} />`)}
+          ${esAdmin() && html`<col style="width:40px" />`}
+        </colgroup>
         <thead><tr>
-          <${Th} campo="n_llamada" rot="N° LL" orden=${orden} setOrden=${setOrden} clase="congelada c-ll" />
-          <${Th} campo="tipo_pedido" rot="Pedido" orden=${orden} setOrden=${setOrden} clase="c-pedido" />
-          <${Th} campo="n_serie" rot="Serie" orden=${orden} setOrden=${setOrden} clase="c-serie" />
-          <${Th} campo="modelo" rot="Mod." orden=${orden} setOrden=${setOrden} clase="c-modelo" />
-          <${Th} campo="fecha_instalacion" rot="Instal." orden=${orden} setOrden=${setOrden} clase="c-inst" />
-          <${Th} campo="cliente_nombre" rot="Cliente" orden=${orden} setOrden=${setOrden} clase="c-cliente corte" />
-          <th class="c-dir">Dirección</th>
-          <th class="c-ciudad">Ciudad y provincia</th>
-          <${Th} campo="tipo_servicio" rot="Servicio" orden=${orden} setOrden=${setOrden} clase="c-serv corte" />
-          <${Th} campo="prioridad" rot="Prior." orden=${orden} setOrden=${setOrden} clase="c-prior" />
-          <${Th} campo="estado" rot="Estado" orden=${orden} setOrden=${setOrden} clase="c-estado" />
-          ${verPlata && html`<${Th} campo="cierre" rot="Cierre" orden=${orden} setOrden=${setOrden} clase="c-cierre" />`}
-          <${Th} campo="n_semana" rot="Semana" orden=${orden} setOrden=${setOrden} clase="c-semana" />
-          <${Th} campo="fecha_visita" rot="Fecha" orden=${orden} setOrden=${setOrden} clase="c-fecha" />
-          <th class="c-obs corte">Observaciones del servicio</th>
-          <${Th} campo="tecnicos" rot="Técnico" orden=${orden} setOrden=${setOrden} clase="c-tec" />
-          ${verPlata && html`<${Th} campo="precio_sin_iva" rot="Precio s/IVA" orden=${orden} setOrden=${setOrden} clase="c-precio corte" />`}
-          ${verPlata && html`<${Th} campo="facturado" rot="Facturado" orden=${orden} setOrden=${setOrden} clase="c-fact" />`}
-          ${verPlata && html`<${Th} campo="cobrado" rot="Cobrado" orden=${orden} setOrden=${setOrden} clase="c-cob" />`}
-          ${!verPlata && html`<${Th} campo="horas_mo" rot="Horas" orden=${orden} setOrden=${setOrden} clase="c-horas corte" />`}
-          ${!verPlata && html`<th class="c-coment">Comentarios internos</th>`}
+          ${columnasVisibles.map(c => cabecera(c))}
           ${esAdmin() && html`<th class="c-borrar"></th>`}
         </tr></thead>
         <tbody>
@@ -3760,7 +3939,9 @@ function Trabajos() {
                   aria-hidden="true"><td></td></tr>` : null,
             html`<tr key=${t.id}
               class=${['tono-' + tonoDeFila(t),
-                       (porHacer(t) || (t.estado === 'CUMPLIDO' && faltaFacturacion(t))) ? 'por-hacer' : '',
+                       // la facturación EN CURSO ya se está gestionando: no se
+                       // pinta amarilla igual que lo que todavía no se tocó
+                       (porHacer(t) || (t.estado === 'CUMPLIDO' && faltaFacturacion(t) && t.facturado !== 'EN CURSO')) ? 'por-hacer' : '',
                        verPlata && estaAbierto(t) && !faltaFacturacion(t) ? 'sin-cerrar' : '',
                        String(s.destacado) === String(t.id) ? 'recien' : '',
                        corteDeSemana.has(t.id) ? 'otra-semana' : '',
@@ -3769,29 +3950,7 @@ function Trabajos() {
                 ? `Equipo instalado el ${fecha(t.fecha_instalacion, 1)}: ${Math.abs(diasDeInstalado(t))} días antes de la visita`
                 : ''}
               onClick=${() => setAbierto(t.id)}>
-            <td class="congelada corta"><b>${t.n_llamada || '#' + t.id}</b>${
-              t.sin_sincronizar ? html`<span class="et gris" style="margin-left:4px" title="Todavía sin subir: se sube solo cuando vuelva internet">⟳</span>` : null}</td>
-            <td class="pedido"><div class="rec">${t.tipo_pedido}</div></td>
-            <td class="corta">${t.n_serie}</td>
-            <td class="corta apoyo">${t.modelo}</td>
-            <td class="fecha apoyo">${fecha(t.fecha_instalacion, 1)}</td>
-            <td class="cliente corte" title=${t.cliente_nombre}><div class="rec">${t.cliente_nombre}</div></td>
-            <td class="apoyo" title=${direccionDe(t)}><div class="rec">${direccionDe(t)}</div></td>
-            <td class="apoyo" title=${ubicacion(t)}><div class="rec">${ubicacion(t)}</div></td>
-            <td class="corte"><div class="rec">${t.tipo_servicio}</div></td>
-            <td class="etq"><${Et} txt=${t.prioridad} mapa=${COLOR_PRIORIDAD} /></td>
-            <td class="etq"><${Et} txt=${t.estado} mapa=${COLOR_ESTADO} /></td>
-            ${verPlata && html`<td class="etq"><${MarcaCierre} t=${t} /></td>`}
-            <td class="corta apoyo">${t.n_semana || ''}</td>
-            <td class="fecha">${fecha(t.fecha_visita)}${recienInstalado(t)
-              ? html`<div><span class="marca-recien">visita antes del mes</span></div>` : ''}</td>
-            <td class="apoyo corte" title=${t.obs_servicio}><div class="rec">${t.obs_servicio}</div></td>
-            <td title=${t.tecnicos}><div class="rec">${t.tecnicos}</div></td>
-            ${verPlata && html`<td class="num corta corte">${plata(t.precio_sin_iva)}</td>`}
-            ${verPlata && html`<td class="etq"><${Et} txt=${t.facturado} mapa=${COLOR_COBRO} /></td>`}
-            ${verPlata && html`<td class="etq"><${Et} txt=${t.cobrado} mapa=${COLOR_COBRO} /></td>`}
-            ${!verPlata && html`<td class="num corta corte">${t.horas_mo || ''}</td>`}
-            ${!verPlata && html`<td class="apoyo" title=${t.comentarios}><div class="rec">${t.comentarios || ''}</div></td>`}
+            ${columnasVisibles.map(c => c.td(t))}
             ${esAdmin() && html`<td class="corta"><button class="btn sec chico borrar" title="Borrar este registro"
               onClick=${e => { e.stopPropagation(); setBorrando(t); }}>✕</button></td>`}
           </tr>`,
@@ -3804,6 +3963,25 @@ function Trabajos() {
           Mostrar más (${(filtrados.length - tope).toLocaleString('es-AR')} restantes)</button></div>`}
       <${Deslizador} para=${caja} />
     </div>
+
+    ${menuCols && html`<${Fragment}>
+      <div class="capa-cierre-menu" onClick=${() => setMenuCols(null)}></div>
+      <div class="menu-columnas" style=${`top:${menuCols.top}px;left:${menuCols.left}px`}>
+        <div class="mini" style="margin-bottom:6px;font-weight:700">Columnas visibles</div>
+        ${columnasDisponibles.map(c => html`<label key=${c.id} class="fila"
+            style="gap:6px;padding:3px 0;cursor:pointer">
+          <input type="checkbox" style="width:auto" checked=${!ocultas.includes(c.id)}
+            disabled=${c.fija} onChange=${() => alternarColumna(c.id)} />
+          <span>${c.rot}${c.fija ? ' (siempre visible)' : ''}</span>
+        </label>`)}
+        <div class="fila" style="justify-content:space-between;margin-top:8px;
+            border-top:1px solid var(--borde);padding-top:8px">
+          <button class="btn sec chico" title="Volver a mostrar todas las columnas con su ancho original"
+            onClick=${restablecerColumnas}>Restablecer</button>
+          <button class="btn chico" onClick=${() => setMenuCols(null)}>Listo</button>
+        </div>
+      </div>
+    <//>`}
 
     ${borrando && html`<${BorrarTrabajo} t=${borrando} alCerrar=${() => setBorrando(null)} />`}
     ${abierto && (verPlata
@@ -3958,6 +4136,13 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
   async function cambiarFacturado(valor) {
     const campos = { facturado: valor };
     if (valor === 'NO APLICA' && b2.fecha_factura) campos.fecha_factura = null;
+    // Al mandar a facturar el cobro vuelve a NO: recién se va a saber si se
+    // cobra (o no) una vez que la factura esté en curso, así que no debe
+    // quedar colgado un estado de cobro viejo de antes de reabrir el caso.
+    if (valor === 'EN CURSO') {
+      campos.cobrado = 'NO';
+      if (b2.fecha_pago) campos.fecha_pago = null;
+    }
     let aviso = 'Guardado';
     if (valor === 'NO APLICA' && estaAbierto(b2)) {
       const falta = faltaParaCerrar({ ...b2, ...campos });
@@ -5260,6 +5445,8 @@ function Giras() {
             alCambiar=${v => actualizarGira({ fecha_desde: v, ...semanaCampos(v) })} />
           <${Txt} rot="Hasta" tipo="date" valor=${gira.fecha_hasta} disabled=${!editable}
             alCambiar=${v => actualizarGira({ fecha_hasta: v })} />
+          <${Txt} rot="N° de semana" tipo="number" valor=${gira.n_semana} disabled=${!esAdmin()}
+            alCambiar=${v => actualizarGira({ n_semana: v })} />
           <${Campo} rot="Técnico 1">
             <select disabled=${!editable} value=${gira.tecnico_id || ''}
               onChange=${e => actualizarGira({ tecnico_id: e.target.value ? Number(e.target.value) : null })}>
@@ -5281,6 +5468,11 @@ function Giras() {
           <${Txt} rot="Efectivo entregado al técnico ($)" tipo="number" valor=${gira.viaticos}
             disabled=${!esAdmin()}
             alCambiar=${v => actualizarGira({ viaticos: v, viaticos_entregados: Number(v) > 0 })} />
+        </div>
+        <div class="mini" style="margin-top:2px">
+          El número de semana se calcula solo a partir de la fecha "Desde";
+          ${esAdmin() ? 'como administrador podés corregirlo a mano cuando haga falta.'
+            : 'sólo el administrador puede corregirlo a mano.'}
         </div>
         <div class="fila mini" style="margin-top:2px">
           <label class="fila" style="gap:6px;${esAdmin() ? 'cursor:pointer' : ''}">
@@ -6362,11 +6554,11 @@ function Cobranza() {
       && !CERRADO_COBRO.includes(t.cobrado) && !t.fecha_pago;
     if (vista === 'facturacion_cargada') return t.estado === 'CUMPLIDO'
       && !!idsFacturacionCargada && idsFacturacionCargada.has(t.id)
-      // Cancelado, Verdejo (lo facturó Alejandro Verdejo por su cuenta) y No
-      // aplica no son casos que Administración tenga que facturar: aunque se
-      // haya tocado algún dato de facturación ese día, no corresponde que
-      // aparezcan en la planilla que se le manda.
-      && !['CANCELADO', 'VERDEJO', 'NO APLICA'].includes(t.facturado);
+      // Esta vista es para juntar lo que falta MANDAR a facturar: una vez
+      // que ya está facturado EN CURSO y la factura fue solicitada, el caso
+      // sigue su curso por otro lado y no corresponde que siga apareciendo
+      // acá sólo porque ese día también se le tocó algún otro dato.
+      && t.facturado === 'EN CURSO' && !t.factura_solicitada;
     if (vista === 'todos_registros') return true;
     return enCirculo(t);
   }), [s.trabajos, vista, idsFacturacionCargada]);
@@ -6453,6 +6645,13 @@ function Cobranza() {
   async function cambiarFacturado(t, valor) {
     const campos = { facturado: valor };
     if (valor === 'NO APLICA' && t.fecha_factura) campos.fecha_factura = null;
+    // Al mandar a facturar el cobro vuelve a NO: recién se va a saber si se
+    // cobra (o no) una vez que la factura esté en curso, así que no debe
+    // quedar colgado un estado de cobro viejo de antes de reabrir el caso.
+    if (valor === 'EN CURSO') {
+      campos.cobrado = 'NO';
+      if (t.fecha_pago) campos.fecha_pago = null;
+    }
     let aviso = 'Guardado';
     if (valor === 'NO APLICA' && estaAbierto(t)) {
       const falta = faltaParaCerrar({ ...t, ...campos });
@@ -7910,6 +8109,10 @@ function Linea({ titulo, nota, datos, formato, tono = 1, enCurso = false }) {
 function Barras({ titulo, datos, formato, nota, tono = 1, tope = 12 }) {
   const lista = datos.slice(0, tope);
   const max = Math.max(1, ...lista.map(d => d[1]));
+  // el porcentaje es sobre el total de verdad (toda la lista, no sólo lo que
+  // se ve): así, aunque se muestren los primeros 10 de 40, cada barra dice
+  // qué parte del total representa, no del recorte.
+  const total = datos.reduce((a, d) => a + d[1], 0) || 1;
   const fmt = formato || numAR;
   return html`<div class="panel grafico" style=${`--tono:var(--sv-${tono})`}>
     <div class="panel-cab"><h2>${titulo}</h2>${nota && html`<span class="mini">${nota}</span>`}</div>
@@ -7917,11 +8120,11 @@ function Barras({ titulo, datos, formato, nota, tono = 1, tope = 12 }) {
       ${!lista.length && html`<div class="mini">Sin datos en el período.</div>`}
       <div class="barras">
         ${lista.map(([rot, val]) => html`<div class="barra-item" key=${rot}
-            title=${`${rot}: ${fmt(val)}`}>
+            title=${`${rot}: ${fmt(val)} (${Math.round(val / total * 100)}%)`}>
           <span class="rotulo" title=${rot}>${rot}</span>
           <span class="track"><span class="fill"
             style=${`width:${Math.max(1.5, val / max * 100)}%`}></span></span>
-          <span class="der valor">${fmt(val)}</span>
+          <span class="der valor">${fmt(val)} <span class="mini">(${Math.round(val / total * 100)}%)</span></span>
         </div>`)}
       </div>
       ${datos.length > tope && html`<div class="mini" style="margin-top:6px">
@@ -8138,9 +8341,18 @@ function ColumnasApiladas({ titulo, nota, meses, series, formato }) {
               if (!v) return null;
               const h = v / max * alto;
               acumulado += h;
-              return html`<rect x=${x} y=${arriba + alto - acumulado} width=${barra} height=${h}
-                fill=${SV[k % 5]} opacity=${encima === null || encima === k ? 1 : .35}>
-                <title>${m} · ${s.rot}: ${fmt(v)}</title></rect>`;
+              const yTop = arriba + alto - acumulado;
+              // el valor se escribe adentro del tramo sólo si entra cómodo:
+              // un tramo de pocos píxeles con el número encima queda ilegible
+              // y se superpone con el de al lado.
+              const entra = h >= 13 && barra >= 16;
+              return html`<g key=${s.rot}>
+                <rect x=${x} y=${yTop} width=${barra} height=${h}
+                  fill=${SV[k % 5]} opacity=${encima === null || encima === k ? 1 : .35}>
+                  <title>${m} · ${s.rot}: ${fmt(v)}</title></rect>
+                ${entra && html`<text x=${x + barra / 2} y=${yTop + h / 2 + 3.5} text-anchor="middle"
+                  class="valor-barra" opacity=${encima === null || encima === k ? 1 : .35}>${fmt(v)}</text>`}
+              </g>`;
             })}
             <text x=${x + barra / 2} y=${H - 8} text-anchor="middle"
               class="eje">${String(m).slice(0, 3)}</text>
@@ -8448,9 +8660,10 @@ function Tablero() {
   const anios = useMemo(() => [...new Set(s.trabajos.map(t => String(t.fecha_visita || '').slice(0, 4))
     .filter(a => a.length === 4))].sort().reverse(), [s.trabajos]);
   const [anio, setAnio] = useState(() => String(new Date().getFullYear()));
-  /* Carga (Mateo) entra al tablero para ver cómo viene el trabajo, pero no la
-     plata: los recuadros y gráficos de facturación y cobranza no se dibujan. */
-  const verPlata = puedeMontos();
+  /* Carga (Mateo) entra al tablero con acceso completo -- incluidos los
+     importes de facturación -- salvo el último apartado ("Cómo va la
+     cobranza"), que queda sólo para el administrador. */
+  const verCobranza = esAdmin();
 
   const delAnio = useMemo(() => s.trabajos.filter(t =>
     String(t.fecha_visita || '').slice(0, 4) === anio), [s.trabajos, anio]);
@@ -8581,9 +8794,7 @@ function Tablero() {
       <div class="panel-cab">
         <h2>Tablero ${anio}</h2>
         <${Sel} valor=${anio} opts=${anios} vacio="Año" alCambiar=${v => setAnio(v || anio)} />
-        <span class="mini">${verPlata
-          ? 'Los importes son sin IVA, tal como se cargan en cada trabajo.'
-          : 'Muestra el trabajo del año; los importes no se incluyen en esta vista.'}</span>
+        <span class="mini">Los importes son sin IVA, tal como se cargan en cada trabajo.</span>
         <button class="btn sec chico" style="margin-left:auto" onClick=${() => window.print()}>Imprimir</button>
       </div>
     </div>
@@ -8598,11 +8809,11 @@ function Tablero() {
           sub=${`${abiertos.filter(t => t.prioridad === 'Alta').length} de prioridad alta`} />
         <${Tarjeta} tono=${3} rot="Equipos atendidos" val=${numAR(equiposAtendidos)}
           sub=${`de ${numAR(s.equipos.length)} en la base`} />
-        ${verPlata && html`<${Tarjeta} tono=${4} rot="Facturado del año" val=${plata(facturado)}
+        <${Tarjeta} tono=${4} rot="Facturado del año" val=${plata(facturado)}
           sub=${`con IVA ${plata(facturadoConIva)}`}
-          serie=${montoMes.map(m => m[1])} />`}
-        ${verPlata && html`<${Tarjeta} tono=${5} rot="Pendiente de cobro" val=${plata(aCobrar)}
-          sub=${`${s.trabajos.filter(t => t.cobrado === 'NO').length} facturas`} />`}
+          serie=${montoMes.map(m => m[1])} />
+        <${Tarjeta} tono=${5} rot="Pendiente de cobro" val=${plata(aCobrar)}
+          sub=${`${s.trabajos.filter(t => t.cobrado === 'NO').length} facturas`} />
       </div>
       <div class="medidores">
         <${Medidor} tono=${2} rot="Garantías sobre el total del año" parte=${garantias}
@@ -8621,8 +8832,8 @@ function Tablero() {
       <div class="rejilla-graficos">
         <${Linea} tono=${1} titulo=${`Trabajos por mes — ${anio}`} datos=${porMes}
           enCurso=${anio === hoyISO().slice(0, 4)} />
-        ${verPlata && html`<${Linea} tono=${4} titulo=${`Facturación por mes — ${anio}`} datos=${montoMes}
-          formato=${v => plata(v)} nota="sin IVA" enCurso=${anio === hoyISO().slice(0, 4)} />`}
+        <${Linea} tono=${4} titulo=${`Facturación por mes — ${anio}`} datos=${montoMes}
+          formato=${v => plata(v)} nota="sin IVA" enCurso=${anio === hoyISO().slice(0, 4)} />
       </div>
       <${ColumnasApiladas} titulo=${`De qué se compone cada mes — ${anio}`}
         nota="el mismo total de arriba, abierto por tipo de pedido"
@@ -8688,7 +8899,7 @@ function Tablero() {
     </section>
 
     <!-- ============ la plata: sólo para quien puede ver importes ============ -->
-    ${verPlata && html`<section class="sector s5">
+    ${verCobranza && html`<section class="sector s5">
       <h3 class="rot-sector">Cómo va la cobranza</h3>
       <${Apilada} titulo="Situación de cobro" nota="todos los años, sobre lo que tiene precio cargado"
         datos=${cobranza.map(c => [c.estado, c.monto])} tope=${5} formato=${v => plata(v)} />
