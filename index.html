@@ -549,37 +549,48 @@ legend{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--a
 .tarjeta .chispa{display:block;width:100%;height:26px;margin-top:6px;overflow:visible}
 
 /* ---------- tarjetas de equipo (Base de datos → Por equipo) ----------
-   Una fila de ancho completo por equipo, bien separada de las demás, para
-   poder identificar cada uno de un vistazo en vez de seguir una fila
-   angosta en una tabla ancha. Adentro, los datos se acomodan en
-   horizontal (un bloque "rótulo arriba / valor abajo" al lado del otro,
-   con wrap si no entran) en vez de apilarse. Es la alternativa a la tabla
-   de siempre (que sigue estando, con el botón "Tabla" / "Tarjetas"). */
-.tarjetas-equipos{display:flex;flex-direction:column;gap:10px;margin-bottom:10px}
+   Cada equipo es una fila (con forma de tarjeta, para distinguir una de la
+   otra y poder tocarla), y los datos se acomodan en columnas de ancho fijo
+   -- las mismas en todas las filas -- con un encabezado único arriba
+   (".teq-encabezado") que nombra cada columna una sola vez. El resultado
+   se lee como una tabla (todo alineado, columna por columna) pero cada
+   fila conserva el recuadro, la sombra y el resaltado al tocar que tenía
+   la tarjeta. Si la pantalla es angosta, dejan de alinearse en columnas y
+   cada tarjeta vuelve a apilar sus datos (como una ficha), para no obligar
+   a hacer scroll de costado en un celular. */
+.teq-encabezado{display:flex;align-items:flex-end;gap:0 18px;padding:0 16px 6px;
+  border:1px solid transparent}
+.teq-col{font-size:10px;color:var(--suave);text-transform:uppercase;
+  letter-spacing:.05em;line-height:1.2;flex:0 0 auto}
+.teq-col-pie{font-size:10px;color:var(--suave);text-transform:uppercase;
+  letter-spacing:.05em;white-space:nowrap;margin-left:auto}
+.tarjetas-equipos{display:flex;flex-direction:column;gap:8px;margin-bottom:10px;overflow-x:auto}
 .tarjeta-equipo{background:var(--papel);border:1px solid var(--borde);border-radius:12px;
-  padding:12px 16px;box-shadow:var(--sombra-chica);cursor:pointer;
-  display:flex;flex-direction:column;gap:9px;
+  padding:10px 16px;box-shadow:var(--sombra-chica);cursor:pointer;
+  display:flex;align-items:center;gap:0 18px;width:max-content;min-width:100%;
   transition:box-shadow .12s,border-color .12s}
 .tarjeta-equipo:hover{box-shadow:var(--sombra-chica-hover);border-color:var(--grafito)}
 .tarjeta-equipo.nuevo{cursor:default;border-style:dashed;background:var(--pastel-4)}
-.teq-cab{display:flex;align-items:center;gap:8px;flex:0 0 auto}
-.teq-serie{font-size:16px;font-weight:700;letter-spacing:.01em;white-space:nowrap}
-/* Cada dato del equipo es una fila de dos columnas (rótulo y valor), con el
-   mismo ancho de rótulo en toda la tarjeta -- así los valores arrancan
-   siempre en la misma columna y se puede leer de arriba hacia abajo sin
-   que el ojo tenga que buscar dónde sigue cada dato. ".teq-campo" se
-   renderiza "display:contents": desaparece como caja y deja que su
-   rótulo y su valor se acomoden directamente en la grilla de la tarjeta. */
-.teq-campos{display:grid;grid-template-columns:168px 1fr;row-gap:6px;column-gap:14px;
-  align-items:baseline}
-.teq-campo{display:contents}
-.teq-campo .rot{font-size:10px;color:var(--suave);text-transform:uppercase;
-  letter-spacing:.05em;white-space:nowrap;padding-top:2px}
-.teq-campo .val{overflow-wrap:break-word}
-.teq-pie{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-  padding-top:8px;border-top:1px solid var(--borde-suave)}
-@media (max-width:900px){
-  .teq-campos{grid-template-columns:128px 1fr}
+.teq-serie{font-size:14px;font-weight:700;letter-spacing:.01em;white-space:nowrap}
+.teq-chips{display:flex;gap:4px;margin-top:3px;flex-wrap:wrap}
+.teq-chips .et{font-size:10px;padding:1px 7px}
+.teq-val{flex:0 0 auto;min-width:0;overflow-wrap:break-word;line-height:1.3}
+.teq-pie{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:0 0 auto;
+  margin-left:auto;padding-left:14px;border-left:1px solid var(--borde-suave)}
+@media (max-width:1300px){
+  /* Pantalla angosta: ya no entran las columnas de ancho fijo, así que la
+     tarjeta vuelve a apilar sus datos como una ficha -- y como el
+     encabezado compartido se esconde, cada dato recupera acá su propio
+     rótulo (antes de "attr(data-rot)", el mismo texto que ya tiene el
+     encabezado, puesto por la tarjeta sin repetir el html). */
+  .teq-encabezado{display:none}
+  .tarjetas-equipos{overflow-x:visible}
+  .tarjeta-equipo{flex-wrap:wrap;width:auto;min-width:0;gap:8px 20px}
+  .teq-val{flex:1 1 160px!important;width:auto!important}
+  .teq-val[data-rot]:before{content:attr(data-rot);display:block;font-size:10px;
+    color:var(--suave);text-transform:uppercase;letter-spacing:.05em;margin-bottom:1px}
+  .teq-pie{margin-left:0;padding-left:0;border-left:0;width:100%;
+    padding-top:8px;border-top:1px solid var(--borde-suave)}
 }
 
 /* la foto de arriba de Cobranza: en qué anda cada caso */
@@ -9441,6 +9452,24 @@ function BaseDeDatos() {
     ...(puedeComercial ? [{ rot: 'Última', val: e => fecha((resumenEq.get(e.id) || {}).ultimo, 1) }] : []),
   ];
 
+  /* Las mismas columnas para la vista "tarjetas", pero pensadas para
+     leerse de un vistazo (algunos datos de la tabla van agrupados en una
+     sola columna, p.ej. "Equipo" junta modelo/paradas/color/motorización).
+     Un solo ancho por columna, compartido entre el encabezado y cada
+     tarjeta, para que las tarjetas se lean como filas de una tabla: todas
+     alineadas, una debajo de la otra. */
+  const colsTarjeta = [
+    { clave: 'serie', titulo: 'N° Serie', ancho: 150 },
+    { clave: 'equipo', titulo: 'Equipo', ancho: 220 },
+    { clave: 'cliente', titulo: 'Cliente', ancho: 170 },
+    { clave: 'ciudad', titulo: 'Ciudad / Provincia', ancho: 150 },
+    { clave: 'direccion', titulo: 'Dirección de instalación', ancho: 230 },
+    { clave: 'vendedor', titulo: 'Vendedor', ancho: 140 },
+    { clave: 'instaladores', titulo: 'Instaladores', ancho: 150 },
+    { clave: 'instalacion', titulo: 'Fecha de instalación', ancho: 110 },
+    ...(puedeComercial ? [{ clave: 'ultima', titulo: 'Última asistencia', ancho: 120 }] : []),
+  ];
+
   return html`<div>
     <div class="panel" style="margin-bottom:10px">
       <div class="panel-cab">
@@ -9546,6 +9575,10 @@ function BaseDeDatos() {
       </div>
       <div class="mini" style="padding:8px 2px">Tocá un cliente para ver sus equipos; tocá un equipo para abrir su ficha e historial.</div>
     ` : (vistaEq === 'tarjetas' ? html`
+      ${!!(equipos.length || nuevosFiltrados.length) && html`<div class="teq-encabezado">
+        ${colsTarjeta.map(col => html`<span class="teq-col" style="width:${col.ancho}px">${col.titulo}</span>`)}
+        <span class="teq-col-pie">Resumen</span>
+      </div>`}
       <div class="tarjetas-equipos">
         ${!soloNuevos && equipos.map(e => {
           const r = resumenEq.get(e.id) || {};
@@ -9554,35 +9587,36 @@ function BaseDeDatos() {
           const dir = e.direccion || (i && i.direccion_instalacion) || '';
           const enGarantia = enGarantiaPorInstalacion(e.fecha_instalacion);
           return html`<div class="tarjeta-equipo" key=${e.id} onClick=${() => setEditEq(e)}>
-            <div class="teq-cab">
-              <span class="teq-serie">${e.n_serie}</span>
-              <span class="et verde">En el sistema</span>
-              ${enGarantia && html`<span class="et alarma" title="Instalado hace menos de un año">En garantía</span>`}
-            </div>
-            <div class="teq-campos">
-              <div class="teq-campo"><span class="rot">Equipo</span><span class="val">
-                ${[e.modelo, e.n_paradas, (i && i.color), e.motorizacion]
-                  .filter(Boolean).join(' · ') || '—'}</span></div>
-              <div class="teq-campo"><span class="rot">Cliente</span><span class="val">${nombreCli(e.cliente_id) || 'sin cliente'}</span></div>
-              <div class="teq-campo"><span class="rot">Ciudad / Provincia</span><span class="val">
-                ${[e.ciudad, e.provincia].filter(Boolean).join(' · ') || '—'}</span></div>
-              <div class="teq-campo" onClick=${ev => puedeAlta && ev.stopPropagation()}>
-                <span class="rot">Dirección de instalación</span>
-                ${puedeAlta
-                  ? html`<${CampoGrilla} valor=${dir} ancho=${220}
-                      titulo="Dirección de instalación" placeholder="Sin cargar…"
-                      onGuardar=${v => guardarDireccionEquipo(e, v)} />`
-                  : html`<span class="val" title=${dir}>${dir || '—'}</span>`}
-              </div>
-              ${(i && i.vendedor) && html`<div class="teq-campo">
-                <span class="rot">Vendedor</span><span class="val">${i.vendedor}</span></div>`}
-              ${(i && i.instaladores) && html`<div class="teq-campo">
-                <span class="rot">Instaladores</span><span class="val">${i.instaladores}</span></div>`}
-              <div class="teq-campo"><span class="rot">Fecha de instalación</span><span class="val">
-                ${e.fecha_instalacion ? fecha(e.fecha_instalacion, 1) : '—'}</span></div>
-              ${puedeComercial && html`<div class="teq-campo"><span class="rot">Última asistencia</span><span class="val">
-                ${r.ultimo ? fecha(r.ultimo, 1) : 'Sin registrar'}</span></div>`}
-            </div>
+            ${colsTarjeta.map(col => {
+              switch (col.clave) {
+                case 'serie': return html`<span class="teq-val" style="width:${col.ancho}px" data-rot=${col.titulo}>
+                  <b class="teq-serie">${e.n_serie}</b>
+                  <span class="teq-chips">
+                    <span class="et verde">En el sistema</span>
+                    ${enGarantia && html`<span class="et alarma" title="Instalado hace menos de un año">En garantía</span>`}
+                  </span>
+                </span>`;
+                case 'equipo': return html`<span class="teq-val" style="width:${col.ancho}px" data-rot=${col.titulo}>
+                  ${[e.modelo, e.n_paradas, (i && i.color), e.motorizacion].filter(Boolean).join(' · ') || '—'}</span>`;
+                case 'cliente': return html`<span class="teq-val" style="width:${col.ancho}px" data-rot=${col.titulo}>${nombreCli(e.cliente_id) || 'sin cliente'}</span>`;
+                case 'ciudad': return html`<span class="teq-val" style="width:${col.ancho}px" data-rot=${col.titulo}>
+                  ${[e.ciudad, e.provincia].filter(Boolean).join(' · ') || '—'}</span>`;
+                case 'direccion': return html`<span class="teq-val" style="width:${col.ancho}px" data-rot=${col.titulo} onClick=${ev => puedeAlta && ev.stopPropagation()}>
+                  ${puedeAlta
+                    ? html`<${CampoGrilla} valor=${dir} ancho=${col.ancho - 10}
+                        titulo="Dirección de instalación" placeholder="Sin cargar…"
+                        onGuardar=${v => guardarDireccionEquipo(e, v)} />`
+                    : html`<span title=${dir}>${dir || '—'}</span>`}
+                </span>`;
+                case 'vendedor': return html`<span class="teq-val" style="width:${col.ancho}px" data-rot=${col.titulo}>${(i && i.vendedor) || '—'}</span>`;
+                case 'instaladores': return html`<span class="teq-val" style="width:${col.ancho}px" data-rot=${col.titulo}>${(i && i.instaladores) || '—'}</span>`;
+                case 'instalacion': return html`<span class="teq-val" style="width:${col.ancho}px" data-rot=${col.titulo}>
+                  ${e.fecha_instalacion ? fecha(e.fecha_instalacion, 1) : '—'}</span>`;
+                case 'ultima': return html`<span class="teq-val" style="width:${col.ancho}px" data-rot=${col.titulo}>
+                  ${r.ultimo ? fecha(r.ultimo, 1) : 'Sin registrar'}</span>`;
+                default: return null;
+              }
+            })}
             <div class="teq-pie">
               <span class="mini">
                 ${puedeComercial ? (r.n || 0) + ' atenc. · ' : ''}${r.garantias || 0} en garantía
@@ -9596,32 +9630,34 @@ function BaseDeDatos() {
           const obsC = c.obs_instalaciones || c.obs_comercial || c.obs_produccion;
           const enGarantia = enGarantiaPorInstalacion(c.fecha_instalacion);
           return html`<div class="tarjeta-equipo nuevo" key=${'n' + c.cod} title="Todavía no está dado de alta">
-            <div class="teq-cab">
-              <span class="teq-serie">${c.codigo}</span>
-              <span class="et ambar">Nuevo</span>
-              ${enGarantia && html`<span class="et alarma" title="Instalado hace menos de un año">En garantía</span>`}
-            </div>
-            <div class="teq-campos">
-              <div class="teq-campo"><span class="rot">Equipo</span><span class="val">
-                ${[c.modelo, c.niveles, c.color, c.motorizacion]
-                  .filter(Boolean).join(' · ') || '—'}</span></div>
-              <div class="teq-campo"><span class="rot">Cliente (sin dar de alta)</span><span class="val">${c.nombre_cliente || '—'}</span></div>
-              <div class="teq-campo"><span class="rot">Ubicación de origen</span><span class="val" title=${c.ubicacion}>${c.ubicacion || '—'}</span></div>
-              <div class="teq-campo" onClick=${ev => puedeAlta && ev.stopPropagation()}>
-                <span class="rot">Dirección de instalación</span>
-                ${puedeAlta
-                  ? html`<${CampoGrilla} valor=${c.direccion_instalacion} ancho=${220}
-                      titulo="Dirección de instalación (se carga a mano)" placeholder="Sin cargar…"
-                      onGuardar=${v => guardarDireccion(c, v)} />`
-                  : html`<span class="val" title=${c.direccion_instalacion}>${c.direccion_instalacion || '—'}</span>`}
-              </div>
-              ${c.vendedor && html`<div class="teq-campo">
-                <span class="rot">Vendedor</span><span class="val">${c.vendedor}</span></div>`}
-              ${c.instaladores && html`<div class="teq-campo">
-                <span class="rot">Instaladores</span><span class="val">${c.instaladores}</span></div>`}
-              <div class="teq-campo"><span class="rot">Fecha de instalación</span><span class="val">
-                ${c.fecha_instalacion ? fecha(c.fecha_instalacion, 1) : '—'}</span></div>
-            </div>
+            ${colsTarjeta.map(col => {
+              switch (col.clave) {
+                case 'serie': return html`<span class="teq-val" style="width:${col.ancho}px" data-rot=${col.titulo}>
+                  <b class="teq-serie">${c.codigo}</b>
+                  <span class="teq-chips">
+                    <span class="et ambar">Nuevo</span>
+                    ${enGarantia && html`<span class="et alarma" title="Instalado hace menos de un año">En garantía</span>`}
+                  </span>
+                </span>`;
+                case 'equipo': return html`<span class="teq-val" style="width:${col.ancho}px" data-rot=${col.titulo}>
+                  ${[c.modelo, c.niveles, c.color, c.motorizacion].filter(Boolean).join(' · ') || '—'}</span>`;
+                case 'cliente': return html`<span class="teq-val" style="width:${col.ancho}px" data-rot=${col.titulo} title="Todavía no está dado de alta como cliente">${c.nombre_cliente || '—'}</span>`;
+                case 'ciudad': return html`<span class="teq-val" style="width:${col.ancho}px" data-rot=${col.titulo} title=${c.ubicacion}>${c.ubicacion || '—'}</span>`;
+                case 'direccion': return html`<span class="teq-val" style="width:${col.ancho}px" data-rot=${col.titulo} onClick=${ev => puedeAlta && ev.stopPropagation()}>
+                  ${puedeAlta
+                    ? html`<${CampoGrilla} valor=${c.direccion_instalacion} ancho=${col.ancho - 10}
+                        titulo="Dirección de instalación (se carga a mano)" placeholder="Sin cargar…"
+                        onGuardar=${v => guardarDireccion(c, v)} />`
+                    : html`<span title=${c.direccion_instalacion}>${c.direccion_instalacion || '—'}</span>`}
+                </span>`;
+                case 'vendedor': return html`<span class="teq-val" style="width:${col.ancho}px" data-rot=${col.titulo}>${c.vendedor || '—'}</span>`;
+                case 'instaladores': return html`<span class="teq-val" style="width:${col.ancho}px" data-rot=${col.titulo}>${c.instaladores || '—'}</span>`;
+                case 'instalacion': return html`<span class="teq-val" style="width:${col.ancho}px" data-rot=${col.titulo}>
+                  ${c.fecha_instalacion ? fecha(c.fecha_instalacion, 1) : '—'}</span>`;
+                case 'ultima': return html`<span class="teq-val" style="width:${col.ancho}px" data-rot=${col.titulo}>—</span>`;
+                default: return null;
+              }
+            })}
             <div class="teq-pie">
               ${(puedeAlta || obsC) && html`<button class="btn sec chico" onClick=${() => setVerObs(c)}>
                 ${obsC ? 'Ver observaciones' : 'Cargar observaciones'}</button>`}
