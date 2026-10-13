@@ -558,23 +558,28 @@ legend{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--a
 .tarjetas-equipos{display:flex;flex-direction:column;gap:10px;margin-bottom:10px}
 .tarjeta-equipo{background:var(--papel);border:1px solid var(--borde);border-radius:12px;
   padding:12px 16px;box-shadow:var(--sombra-chica);cursor:pointer;
-  display:flex;align-items:center;flex-wrap:wrap;gap:8px 22px;
+  display:flex;flex-direction:column;gap:9px;
   transition:box-shadow .12s,border-color .12s}
 .tarjeta-equipo:hover{box-shadow:var(--sombra-chica-hover);border-color:var(--grafito)}
 .tarjeta-equipo.nuevo{cursor:default;border-style:dashed;background:var(--pastel-4)}
 .teq-cab{display:flex;align-items:center;gap:8px;flex:0 0 auto}
 .teq-serie{font-size:16px;font-weight:700;letter-spacing:.01em;white-space:nowrap}
-.teq-campo{display:flex;flex-direction:column;gap:1px;min-width:0;flex:0 1 auto}
+/* Cada dato del equipo es una fila de dos columnas (rótulo y valor), con el
+   mismo ancho de rótulo en toda la tarjeta -- así los valores arrancan
+   siempre en la misma columna y se puede leer de arriba hacia abajo sin
+   que el ojo tenga que buscar dónde sigue cada dato. ".teq-campo" se
+   renderiza "display:contents": desaparece como caja y deja que su
+   rótulo y su valor se acomoden directamente en la grilla de la tarjeta. */
+.teq-campos{display:grid;grid-template-columns:168px 1fr;row-gap:6px;column-gap:14px;
+  align-items:baseline}
+.teq-campo{display:contents}
 .teq-campo .rot{font-size:10px;color:var(--suave);text-transform:uppercase;
-  letter-spacing:.05em;white-space:nowrap}
-.teq-campo .val{max-width:260px;overflow-wrap:break-word}
-.teq-pie{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-left:auto;
-  padding-left:14px;border-left:1px solid var(--borde-suave)}
+  letter-spacing:.05em;white-space:nowrap;padding-top:2px}
+.teq-campo .val{overflow-wrap:break-word}
+.teq-pie{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding-top:8px;border-top:1px solid var(--borde-suave)}
 @media (max-width:900px){
-  .tarjeta-equipo{align-items:stretch}
-  .teq-pie{margin-left:0;padding-left:0;border-left:0;width:100%;
-    padding-top:8px;border-top:1px solid var(--borde-suave)}
-  .teq-campo .val{max-width:none}
+  .teq-campos{grid-template-columns:128px 1fr}
 }
 
 /* la foto de arriba de Cobranza: en qué anda cada caso */
@@ -9554,29 +9559,34 @@ function BaseDeDatos() {
               <span class="et verde">En el sistema</span>
               ${enGarantia && html`<span class="et alarma" title="Instalado hace menos de un año">En garantía</span>`}
             </div>
-            <div class="teq-campo"><span class="rot">Equipo</span><span class="val">
-              ${[e.modelo, e.n_paradas, (i && i.color), e.motorizacion]
-                .filter(Boolean).join(' · ') || '—'}</span></div>
-            <div class="teq-campo"><span class="rot">Cliente</span><span class="val">${nombreCli(e.cliente_id) || 'sin cliente'}</span></div>
-            <div class="teq-campo"><span class="rot">Ciudad / Provincia</span><span class="val">
-              ${[e.ciudad, e.provincia].filter(Boolean).join(' · ') || '—'}</span></div>
-            <div class="teq-campo" onClick=${ev => puedeAlta && ev.stopPropagation()}>
-              <span class="rot">Dirección de instalación</span>
-              ${puedeAlta
-                ? html`<${CampoGrilla} valor=${dir} ancho=${220}
-                    titulo="Dirección de instalación" placeholder="Sin cargar…"
-                    onGuardar=${v => guardarDireccionEquipo(e, v)} />`
-                : html`<span class="val" title=${dir}>${dir || '—'}</span>`}
+            <div class="teq-campos">
+              <div class="teq-campo"><span class="rot">Equipo</span><span class="val">
+                ${[e.modelo, e.n_paradas, (i && i.color), e.motorizacion]
+                  .filter(Boolean).join(' · ') || '—'}</span></div>
+              <div class="teq-campo"><span class="rot">Cliente</span><span class="val">${nombreCli(e.cliente_id) || 'sin cliente'}</span></div>
+              <div class="teq-campo"><span class="rot">Ciudad / Provincia</span><span class="val">
+                ${[e.ciudad, e.provincia].filter(Boolean).join(' · ') || '—'}</span></div>
+              <div class="teq-campo" onClick=${ev => puedeAlta && ev.stopPropagation()}>
+                <span class="rot">Dirección de instalación</span>
+                ${puedeAlta
+                  ? html`<${CampoGrilla} valor=${dir} ancho=${220}
+                      titulo="Dirección de instalación" placeholder="Sin cargar…"
+                      onGuardar=${v => guardarDireccionEquipo(e, v)} />`
+                  : html`<span class="val" title=${dir}>${dir || '—'}</span>`}
+              </div>
+              ${(i && i.vendedor) && html`<div class="teq-campo">
+                <span class="rot">Vendedor</span><span class="val">${i.vendedor}</span></div>`}
+              ${(i && i.instaladores) && html`<div class="teq-campo">
+                <span class="rot">Instaladores</span><span class="val">${i.instaladores}</span></div>`}
+              <div class="teq-campo"><span class="rot">Fecha de instalación</span><span class="val">
+                ${e.fecha_instalacion ? fecha(e.fecha_instalacion, 1) : '—'}</span></div>
+              ${puedeComercial && html`<div class="teq-campo"><span class="rot">Última asistencia</span><span class="val">
+                ${r.ultimo ? fecha(r.ultimo, 1) : 'Sin registrar'}</span></div>`}
             </div>
-            ${((i && i.vendedor) || (i && i.instaladores)) && html`<div class="teq-campo">
-              <span class="rot">Vendedor / Instaladores</span><span class="val">
-              ${[i.vendedor, i.instaladores].filter(Boolean).join(' · ')}</span></div>`}
-            <div class="teq-campo"><span class="rot">Instalación</span><span class="val">
-              ${e.fecha_instalacion ? fecha(e.fecha_instalacion, 1) : '—'}</span></div>
             <div class="teq-pie">
               <span class="mini">
                 ${puedeComercial ? (r.n || 0) + ' atenc. · ' : ''}${r.garantias || 0} en garantía
-                · ${r.horas ? Math.round(r.horas) : 0} h acum.${puedeComercial && r.ultimo ? ' · últ. ' + fecha(r.ultimo, 1) : ''}</span>
+                · ${r.horas ? Math.round(r.horas) : 0} h acum.</span>
               ${(i && (puedeAlta || obs)) && html`<button class="btn sec chico"
                 onClick=${ev => { ev.stopPropagation(); setVerObs(i); }}>${obs ? 'Ver observaciones' : 'Cargar observaciones'}</button>`}
             </div>
@@ -9591,24 +9601,27 @@ function BaseDeDatos() {
               <span class="et ambar">Nuevo</span>
               ${enGarantia && html`<span class="et alarma" title="Instalado hace menos de un año">En garantía</span>`}
             </div>
-            <div class="teq-campo"><span class="rot">Equipo</span><span class="val">
-              ${[c.modelo, c.niveles, c.color, c.motorizacion]
-                .filter(Boolean).join(' · ') || '—'}</span></div>
-            <div class="teq-campo"><span class="rot">Cliente (sin dar de alta)</span><span class="val">${c.nombre_cliente || '—'}</span></div>
-            <div class="teq-campo"><span class="rot">Ubicación de origen</span><span class="val" title=${c.ubicacion}>${c.ubicacion || '—'}</span></div>
-            <div class="teq-campo" onClick=${ev => puedeAlta && ev.stopPropagation()}>
-              <span class="rot">Dirección de instalación</span>
-              ${puedeAlta
-                ? html`<${CampoGrilla} valor=${c.direccion_instalacion} ancho=${220}
-                    titulo="Dirección de instalación (se carga a mano)" placeholder="Sin cargar…"
-                    onGuardar=${v => guardarDireccion(c, v)} />`
-                : html`<span class="val" title=${c.direccion_instalacion}>${c.direccion_instalacion || '—'}</span>`}
+            <div class="teq-campos">
+              <div class="teq-campo"><span class="rot">Equipo</span><span class="val">
+                ${[c.modelo, c.niveles, c.color, c.motorizacion]
+                  .filter(Boolean).join(' · ') || '—'}</span></div>
+              <div class="teq-campo"><span class="rot">Cliente (sin dar de alta)</span><span class="val">${c.nombre_cliente || '—'}</span></div>
+              <div class="teq-campo"><span class="rot">Ubicación de origen</span><span class="val" title=${c.ubicacion}>${c.ubicacion || '—'}</span></div>
+              <div class="teq-campo" onClick=${ev => puedeAlta && ev.stopPropagation()}>
+                <span class="rot">Dirección de instalación</span>
+                ${puedeAlta
+                  ? html`<${CampoGrilla} valor=${c.direccion_instalacion} ancho=${220}
+                      titulo="Dirección de instalación (se carga a mano)" placeholder="Sin cargar…"
+                      onGuardar=${v => guardarDireccion(c, v)} />`
+                  : html`<span class="val" title=${c.direccion_instalacion}>${c.direccion_instalacion || '—'}</span>`}
+              </div>
+              ${c.vendedor && html`<div class="teq-campo">
+                <span class="rot">Vendedor</span><span class="val">${c.vendedor}</span></div>`}
+              ${c.instaladores && html`<div class="teq-campo">
+                <span class="rot">Instaladores</span><span class="val">${c.instaladores}</span></div>`}
+              <div class="teq-campo"><span class="rot">Fecha de instalación</span><span class="val">
+                ${c.fecha_instalacion ? fecha(c.fecha_instalacion, 1) : '—'}</span></div>
             </div>
-            ${(c.vendedor || c.instaladores) && html`<div class="teq-campo">
-              <span class="rot">Vendedor / Instaladores</span><span class="val">
-              ${[c.vendedor, c.instaladores].filter(Boolean).join(' · ')}</span></div>`}
-            <div class="teq-campo"><span class="rot">Instalación</span><span class="val">
-              ${c.fecha_instalacion ? fecha(c.fecha_instalacion, 1) : '—'}</span></div>
             <div class="teq-pie">
               ${(puedeAlta || obsC) && html`<button class="btn sec chico" onClick=${() => setVerObs(c)}>
                 ${obsC ? 'Ver observaciones' : 'Cargar observaciones'}</button>`}
