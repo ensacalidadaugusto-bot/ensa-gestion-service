@@ -8268,6 +8268,12 @@ function CuadroValores({ periodo, datos, alCerrar, alGuardar, editable }) {
    Quién puede qué (la regla de verdad está en la base, sql/46):
      · cargar y modificar: sólo quien tiene "carga_controles" en su perfil;
      · ver: además, el administrador y el visualizador general.
+
+   País y zona de cada equipo: no están cargados como dato propio, salen
+   solos del prefijo del código (ver PAISES_POR_PREFIJO más abajo). La
+   "zona" (Argentina / LATAM) es la que se usa para dividir el banco de
+   pruebas y el tablero, a pedido de Augusto, porque no hay fecha de
+   instalación para dividirlo de otra forma.
    ===================================================================== */
 
 const ESTADOS_CONTROL = ['CUMPLE', 'CUMPLE PARCIALMENTE', 'NO CUMPLE', 'A TIEMPO', 'REPROGRAMADO'];
@@ -8284,6 +8290,38 @@ const MOTORIZACIONES_CONTROL = ['Split', 'Cabezal', 'Silent', 'Cabezal Silent'];
 const SIN_INSPECTOR = 'Mixto';
 /* la fecha que divide los dos períodos del tablero, si no se elige otra */
 const CORTE_CONTROLES = '2026-05-01';
+
+/* El país de cada equipo sale del prefijo de su código/número de serie (a
+   pedido de Augusto): no hay fecha de instalación para dividir el banco de
+   pruebas entre Argentina y el resto, así que se divide por país. Los
+   prefijos de dos letras se prueban antes que "A" y "E" solos, para que un
+   código como "EC009" se tome como Ecuador y no como Europa. */
+const PAISES_POR_PREFIJO = [
+  ['BO', 'Bolivia'], ['CL', 'Chile'], ['CO', 'Colombia'], ['EC', 'Ecuador'],
+  ['NZ', 'Nueva Zelanda'], ['PE', 'Perú'], ['PY', 'Paraguay'], ['UY', 'Uruguay'],
+  ['VE', 'Venezuela'], ['BR', 'Brasil'],
+  ['A', 'Argentina'], ['E', 'Europa'],
+];
+/** las filas con un código que no empieza con ninguno de los prefijos de
+    arriba (no hay con qué adivinar el país) */
+const SIN_PAIS = 'Sin país';
+/** El país del equipo según su código, o null si el prefijo no está en la
+    lista (antes de inventar un país que no se sabe, se avisa aparte). */
+function paisDeCodigo(codigo) {
+  const c = claveSerie(codigo);
+  for (const [prefijo, pais] of PAISES_POR_PREFIJO) if (c.startsWith(prefijo)) return pais;
+  return null;
+}
+/** La zona que se usa para dividir el banco de pruebas y los tableros:
+    Argentina o "LATAM" (todo el resto, así lo pidió el usuario, aunque
+    geográficamente Europa o Nueva Zelanda no lo sean). Un código sin país
+    identificado no entra en ninguna de las dos, para no mezclarlo adentro
+    de un grupo que no le corresponde sin avisar. */
+function zonaDeCodigo(codigo) {
+  const p = paisDeCodigo(codigo);
+  if (!p) return null;
+  return p === 'Argentina' ? 'Argentina' : 'LATAM';
+}
 
 /** ¿quien está conectado puede cargar controles? */
 function puedeControles() { return !!(S.perfil && S.perfil.carga_controles); }
@@ -8373,6 +8411,8 @@ function enriquecerControles(controles, trabajos, equipos, hoy = hoyISO()) {
     return {
       ...c,
       grupo: (c.inspector && String(c.inspector).trim()) || SIN_INSPECTOR,
+      pais: paisDeCodigo(c.codigo),
+      zona: zonaDeCodigo(c.codigo),
       inst,
       instDelMaestro: !soloFecha(c.fecha_instalacion) && !!inst,
       llamado: llam,
@@ -8602,7 +8642,7 @@ function Controles() {
 /* ---------------------------------------------------------------------
    PLANIFICACIÓN SEMANAL — la planilla
    --------------------------------------------------------------------- */
-const FILTRO_CONTROLES = { anio: '', semana: '', inspector: '', estado: '', texto: '', sinLiberar: false };
+const FILTRO_CONTROLES = { anio: '', semana: '', inspector: '', estado: '', zona: '', texto: '', sinLiberar: false };
 
 /** Escala de color leve para la "prioridad otorgada" cuando es un número
     (el orden manual de prioridad mientras el equipo está en cola): los
@@ -8639,8 +8679,9 @@ function PlanSemanal({ filas, alAbrir, alNuevo }) {
       && (!f.semana || String(x.semana) === f.semana)
       && (!f.inspector || x.grupo === f.inspector)
       && (!f.estado || x.estado === f.estado)
+      && (!f.zona || x.zona === f.zona)
       && (!f.sinLiberar || !x.fecha_liberacion)
-      && (!t || sinAcentos([x.codigo, x.destino, x.observaciones, x.obs_reunion, x.acuerdos]
+      && (!t || sinAcentos([x.codigo, x.destino, x.pais, x.observaciones, x.obs_reunion, x.acuerdos]
         .join(' ')).includes(t))), orden);
   }, [filas, f, orden]);
 
@@ -8707,6 +8748,8 @@ function PlanSemanal({ filas, alAbrir, alNuevo }) {
           alCambiar=${v => cambiar('inspector', v || '')} />
         <${Sel} valor=${f.estado} opts=${ESTADOS_CONTROL} vacio="Estado: todos"
           alCambiar=${v => cambiar('estado', v || '')} />
+        <${Sel} valor=${f.zona} opts=${['Argentina', 'LATAM']} vacio="Zona: todas"
+          alCambiar=${v => cambiar('zona', v || '')} />
         <label class="fila mini" style="gap:4px;white-space:nowrap">
           <input type="checkbox" style="width:auto" checked=${f.sinLiberar}
             onChange=${e => cambiar('sinLiberar', e.target.checked)} /> Sólo sin liberar
@@ -8735,6 +8778,7 @@ function PlanSemanal({ filas, alAbrir, alNuevo }) {
           <${Th} campo="semana" rot="Sem." orden=${orden} setOrden=${setOrden} />
           <${Th} campo="prioridad" rot="Prioridad" orden=${orden} setOrden=${setOrden} />
           <${Th} campo="codigo" rot="Código" orden=${orden} setOrden=${setOrden} />
+          <${Th} campo="pais" rot="País" orden=${orden} setOrden=${setOrden} />
           <${Th} campo="destino" rot="Destino" orden=${orden} setOrden=${setOrden} ancho=${180} />
           <${Th} campo="grupo" rot="Inspector" orden=${orden} setOrden=${setOrden} />
           <${Th} campo="fecha_primer_control" rot="1er control" orden=${orden} setOrden=${setOrden} />
@@ -8753,6 +8797,7 @@ function PlanSemanal({ filas, alAbrir, alNuevo }) {
             <td class="num">${x.semana}</td>
             <td style=${colorPrioridad(x.prioridad, ...rangoPrioridad) || ''}>${x.prioridad || ''}</td>
             <td><b>${x.codigo}</b></td>
+            <td>${x.pais || html`<span class="mini">${SIN_PAIS}</span>`}</td>
             <td class="recorte" title=${x.destino || ''}>${x.destino || ''}</td>
             <td>${x.inspector || html`<span class="mini">sin asignar</span>`}</td>
             <td>${fecha(x.fecha_primer_control)}</td>
@@ -8765,7 +8810,7 @@ function PlanSemanal({ filas, alAbrir, alNuevo }) {
             <td title="Sale sola del registro de service">${fecha(x.asistencia)}</td>
             <td class="recorte" title=${x.observaciones || ''}>${x.observaciones || ''}</td>
           </tr>`)}
-          ${!filtradas.length && html`<tr><td colspan="14" class="vacio">
+          ${!filtradas.length && html`<tr><td colspan="15" class="vacio">
             No hay controles con estos filtros.</td></tr>`}
         </tbody>
       </table>
@@ -8780,7 +8825,7 @@ function PlanSemanal({ filas, alAbrir, alNuevo }) {
 /** Bajar a Excel con las mismas columnas que tenía la planilla */
 function exportarControles(filas) {
   const F = v => (v ? { f: soloFecha(v) } : null);
-  const columnas = ['Año', 'Semana', 'Prioridad Otorgada', 'Código', 'Motorización', 'Destino',
+  const columnas = ['Año', 'Semana', 'Prioridad Otorgada', 'Código', 'País', 'Motorización', 'Destino',
     'Fecha de primer control', 'Días entre entrega para control y fecha compromiso',
     'Cantidad de controles', 'Fecha Compromiso Entrega - Fecha reunión', 'Fecha Liberación',
     'Fecha Original STP', 'Observaciones', 'Estado al día de compromiso de entrega', 'Estado',
@@ -8789,7 +8834,7 @@ function exportarControles(filas) {
     'Fecha de primer asistencia en garantía', 'Días Liberación→Instalación',
     'Días Instalación→Primer llamado', 'Días Instalación→Primera asistencia',
     'Días Control inicial→Liberación'];
-  const datos = filas.map(x => [x.anio, x.semana, x.prioridad, x.codigo, x.motorizacion, x.destino,
+  const datos = filas.map(x => [x.anio, x.semana, x.prioridad, x.codigo, x.pais || SIN_PAIS, x.motorizacion, x.destino,
     F(x.fecha_primer_control), x.dCompromiso, x.cantidad_controles, F(x.fecha_compromiso),
     x.fecha_liberacion ? F(x.fecha_liberacion) : 'NO LIBERADO', F(x.fecha_original_stp),
     x.observaciones, x.estado_compromiso, x.estado, x.obs_reunion, x.acuerdos, x.inspector,
@@ -8916,6 +8961,8 @@ function FichaControl({ original, precarga, filas, alCerrar, alGuardar, alAbrir 
           ${T('semana', 'Semana', 'number')}
           ${L('prioridad', 'Prioridad otorgada', PRIORIDADES_CONTROL, 'dl-prioridad')}
           ${T('codigo', 'Código *')}
+          <div class="campo"><span>País</span>
+            <div class="mini" style="padding-top:6px">${paisDeCodigo(b.codigo) || SIN_PAIS}</div></div>
           ${L('motorizacion', 'Motorización', MOTORIZACIONES_CONTROL, 'dl-motor')}
           ${L('inspector', 'Inspector', listas.inspectores, 'dl-inspector')}
         </div>
@@ -9001,8 +9048,20 @@ const dec1 = v => (v === null || v === undefined ? '—'
   : Number(v).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
 const pct = (a, b) => (b ? `${Math.round(a / b * 100)}%` : '—');
 
-function TableroControles({ filas, alAbrir }) {
+function TableroControles({ filas: todas, alAbrir }) {
   const [corte, setCorte] = useState(CORTE_CONTROLES);
+  const [zona, setZona] = useState('');
+  /* La misma división por país que en la Planificación semanal: no hay
+     fecha de instalación para separar el banco de pruebas entre Argentina
+     y el resto, así que se separa por el país del código. "LATAM" agrupa
+     todo lo que no es Argentina; un equipo sin país identificado no entra
+     en ninguno de los dos (aparece sólo con el filtro en "todas"), para no
+     sumarlo adentro de un grupo que no le corresponde. Se filtra acá
+     arriba de todo, así el resto de la pantalla -- tarjetas, gráficos,
+     resumen por inspector -- ya trabaja sobre lo filtrado sin tener que
+     tocar nada más. */
+  const filas = useMemo(() => (zona ? todas.filter(f => f.zona === zona) : todas), [todas, zona]);
+  const sinPaisTotal = useMemo(() => todas.filter(f => !f.pais).length, [todas]);
   const hoy = hoyISO();
   const liberadas = filas.filter(f => f.fecha_liberacion);
   /* los mismos inspectores en los dos períodos, para que los gráficos se
@@ -9069,7 +9128,10 @@ function TableroControles({ filas, alAbrir }) {
         <label class="fila mini" style="gap:6px">Dividir los períodos el
           <input type="date" style="width:150px" value=${corte}
             onChange=${e => setCorte(e.target.value || CORTE_CONTROLES)} /></label>
-        <span class="mini">Cuenta los equipos con fecha de liberación, como el informe de Excel.</span>
+        <${Sel} valor=${zona} opts=${['Argentina', 'LATAM']} vacio="Zona: todas"
+          alCambiar=${v => setZona(v || '')} />
+        <span class="mini">Cuenta los equipos con fecha de liberación, como el informe de Excel.${
+          zona ? ` Mostrando sólo ${zona}.` : ''}</span>
         <button class="btn sec chico" style="margin-left:auto" onClick=${() => window.print()}>Imprimir</button>
       </div>
     </div>
@@ -9183,7 +9245,7 @@ function TableroControles({ filas, alAbrir }) {
     </section>
 
     <!-- ============ para revisar ============ -->
-    ${(revisar.length > 0 || sinInspector > 0) && html`<section class="sector s5">
+    ${(revisar.length > 0 || sinInspector > 0 || sinPaisTotal > 0) && html`<section class="sector s5">
       <h3 class="rot-sector">Datos para revisar</h3>
       <div class="panel"><div class="panel-cuerpo">
         <div class="mini" style="margin-bottom:6px">Corren los promedios de arriba. Tocá una fila para
@@ -9194,6 +9256,10 @@ function TableroControles({ filas, alAbrir }) {
         ${sinInspector > 0 && html`<div class="mini" style="margin-top:6px">
           ${numAR(sinInspector)} equipos liberados no tienen inspector cargado y se cuentan como
           “${SIN_INSPECTOR}”.</div>`}
+        ${sinPaisTotal > 0 && html`<div class="mini" style="margin-top:6px">
+          ${numAR(sinPaisTotal)} equipos tienen un código que no empieza con ninguno de los prefijos de
+          país conocidos: no entran en el filtro de zona de arriba (ni en “Argentina” ni en “LATAM”),
+          sólo se ven con el filtro en “todas”.</div>`}
       </div></div>
     </section>`}
   </div>`;
