@@ -8353,21 +8353,35 @@ function clavesDeCodigo(codigo) {
 }
 
 /**
- * El estado que corresponde según las fechas. Es la misma regla de la
- * fórmula de la planilla, más "A TIEMPO" para lo que todavía no venció:
- *   · liberado hasta la fecha de compromiso         → CUMPLE
- *   · liberado después, pero en la misma semana     → CUMPLE PARCIALMENTE
- *   · liberado en otra semana                       → NO CUMPLE
- *   · sin liberar y el compromiso todavía no llegó  → A TIEMPO
- *   · sin liberar y el compromiso ya pasó           → NO CUMPLE
+ * El estado que corresponde según las fechas. Es, al pie de la letra, la
+ * fórmula de la planilla de Excel (I = fecha compromiso, J = fecha de
+ * liberación), más "A TIEMPO" para lo que todavía no venció, que ya traía
+ * esa misma fórmula:
+ *   =SI(Y(ESNUMERO(J); J<>""); SI(J<=I; "CUMPLE";
+ *        SI((J-DIASEM(J;2))=(I-DIASEM(I;2)); "CUMPLE PARCIALMENTE"; "NO CUMPLE"));
+ *      SI(I>HOY(); "A TIEMPO"; "NO CUMPLE"))
+ *   · liberado hasta la fecha de compromiso                → CUMPLE
+ *   · liberado después, pero en la misma semana (de lunes
+ *     a domingo, como DIASEM(…;2))                         → CUMPLE PARCIALMENTE
+ *   · liberado en otra semana                               → NO CUMPLE
+ *   · sin liberar y el compromiso todavía no llegó          → A TIEMPO
+ *   · sin liberar y el compromiso ya venció (o no está
+ *     cargado: Excel lo toma como 0, siempre vencido)       → NO CUMPLE
  * REPROGRAMADO no sale de las fechas: lo elige quien carga.
+ *
+ * Una sola diferencia a propósito con la fórmula de Excel: si NO hay
+ * ningún dato cargado (ni compromiso ni liberación), acá no se sugiere
+ * nada (null) en lugar de "NO CUMPLE". En Excel una celda vacía vale 0, así
+ * que una fila recién creada y sin cargar termina comparándose contra el
+ * 31/12/1899 y sale "NO CUMPLE" aunque no haya nada que evaluar todavía;
+ * acá se prefiere no sugerir nada hasta que se cargue al menos una fecha.
  */
 function estadoSugerido(c, hoy = hoyISO()) {
   const comp = soloFecha(c.fecha_compromiso), lib = soloFecha(c.fecha_liberacion);
-  if (!comp) return lib ? 'CUMPLE' : null;
-  if (!lib) return comp >= hoy ? 'A TIEMPO' : 'NO CUMPLE';
-  if (lib <= comp) return 'CUMPLE';
-  if (lunesDe(lib) === lunesDe(comp)) return 'CUMPLE PARCIALMENTE';
+  if (!comp && !lib) return null;
+  if (!lib) return comp > hoy ? 'A TIEMPO' : 'NO CUMPLE';
+  if (comp && lib <= comp) return 'CUMPLE';
+  if (comp && lunesDe(lib) === lunesDe(comp)) return 'CUMPLE PARCIALMENTE';
   return 'NO CUMPLE';
 }
 
