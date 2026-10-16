@@ -533,6 +533,16 @@ legend{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--a
 .sector.s5{background:var(--pastel-5)}
 .rot-sector{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.09em;
   color:var(--suave);font-weight:600}
+
+/* el objetivo mensual se destaca del resto de los sectores del Tablero --
+   es lo primero que tiene que verse (Augusto: "que esté más resaltado y
+   visible"), con un borde y una franja del color de marca en vez del
+   borde parejo que tienen los demás sectores */
+.sector.objetivos{position:relative;overflow:hidden;padding-left:19px;
+  border:2px solid var(--acento);
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--acento) 16%, transparent), var(--sombra)}
+.sector.objetivos:before{content:"";position:absolute;left:0;top:0;bottom:0;width:7px;background:var(--acento)}
+.sector.objetivos .rot-sector{font-size:16px;color:var(--acento);letter-spacing:.02em}
 .rejilla-graficos{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));
   align-items:start;margin-bottom:10px}
 .sector .panel{margin-bottom:0}
@@ -10568,7 +10578,7 @@ function PanelObjetivos({ anio, trabajos, hastaMes }) {
   }), [delAnio, realesDelMes, anio, hoyA, hoyM]);
 
   if (datos === null) return null;
-  if (error) return html`<section class="sector s1">
+  if (error) return html`<section class="sector s1 objetivos">
     <h3 class="rot-sector">Objetivos del mes</h3>
     <div class="aviso error">${error}</div>
   </section>`;
@@ -10578,7 +10588,7 @@ function PanelObjetivos({ anio, trabajos, hastaMes }) {
     ? (d || []).filter(x => x.id !== fila.id)
     : [...(d || []).filter(x => x.id !== fila.id), fila]);
 
-  return html`<section class="sector s1">
+  return html`<section class="sector s1 objetivos">
     <div class="fila" style="justify-content:space-between;align-items:baseline">
       <h3 class="rot-sector">Objetivos — ${anio}</h3>
       ${esAdmin() && html`<button class="btn sec chico" onClick=${() => setModal({})}>+ Agregar objetivo</button>`}
