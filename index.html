@@ -5993,7 +5993,29 @@ function HojaRuta({ gira, paradas, alCerrar }) {
   const paradasDelDia = useMemo(() => diaFiltro
     ? paradasDelTecnico.filter(t => (t.fecha_visita || 'Sin fecha') === diaFiltro)
     : paradasDelTecnico, [paradasDelTecnico, diaFiltro]);
-  const recomendado = useMemo(() => tamañoRecomendado(paradasDelDia), [paradasDelDia]);
+  /* Qué trabajos van realmente a la hoja impresa: Augusto pidió poder
+     elegir, con una casilla por trabajo, cuáles entran y cuáles no --
+     además de filtrar por técnico/día, que sigue existiendo para el caso
+     de querer repartir la hoja entera. Arranca con todo tildado (se
+     imprime como hasta ahora si nadie toca nada) y la selección es sobre
+     TODA la gira, no sólo lo que entra en el filtro de técnico/día
+     elegido en este momento: si se cambia el filtro, lo tildado o
+     destildado antes se respeta. */
+  const [seleccion, setSeleccion] = useState(() => new Set(paradas.map(p => p.id)));
+  const alternarUno = id => setSeleccion(prev => {
+    const n = new Set(prev);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    return n;
+  });
+  const todosTildados = paradasDelDia.length > 0 && paradasDelDia.every(t => seleccion.has(t.id));
+  const alternarTodos = () => setSeleccion(prev => {
+    const n = new Set(prev);
+    paradasDelDia.forEach(t => todosTildados ? n.delete(t.id) : n.add(t.id));
+    return n;
+  });
+  const paradasImpresion = useMemo(() => paradasDelDia.filter(t => seleccion.has(t.id)),
+    [paradasDelDia, seleccion]);
+  const recomendado = useMemo(() => tamañoRecomendado(paradasImpresion), [paradasImpresion]);
   const [tam, setTam] = useState(recomendado);   // tamaño de letra de la planilla
   useEffect(() => {
     document.body.classList.add('imprimiendo');
@@ -6001,9 +6023,9 @@ function HojaRuta({ gira, paradas, alCerrar }) {
   }, []);
 
   const grupos = useMemo(() => {
-    if (!corte) return [[null, paradasDelDia]];
+    if (!corte) return [[null, paradasImpresion]];
     const m = new Map();
-    paradasDelDia.forEach(t => {
+    paradasImpresion.forEach(t => {
       const k = corte === 'dia'
         ? (t.fecha_visita || 'Sin fecha')
         : (t.tecnicos || 'Sin técnico asignado');
@@ -6011,16 +6033,16 @@ function HojaRuta({ gira, paradas, alCerrar }) {
       m.get(k).push(t);
     });
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'es'));
-  }, [paradasDelDia, corte]);
+  }, [paradasImpresion, corte]);
 
   /* A4 apaisado con 6 mm de margen ≈ 1075 px de ancho útil */
-  const anchos = useMemo(() => anchosPlanilla(COLS_HOJA, paradasDelDia, 1072, tam), [paradasDelDia, tam]);
+  const anchos = useMemo(() => anchosPlanilla(COLS_HOJA, paradasImpresion, 1072, tam), [paradasImpresion, tam]);
   /* Qué tan apretada queda la hoja con el tamaño elegido */
   const holgura = useMemo(() => {
-    const m = COLS_HOJA.map(([rot, val]) => medidasColumna(rot, paradasDelDia.map(f => val(f)), tam,
+    const m = COLS_HOJA.map(([rot, val]) => medidasColumna(rot, paradasImpresion.map(f => val(f)), tam,
       rot === 'OBSERVACIONES'));
     return 1072 - m.reduce((a, x) => a + x.minimo, 0);
-  }, [paradasDelDia, tam]);
+  }, [paradasImpresion, tam]);
 
   /* Cuando en una misma tabla conviven trabajos de más de un día ("Todo
      junto", o separando por técnico, que puede mezclar días de la semana),
@@ -6099,7 +6121,8 @@ function HojaRuta({ gira, paradas, alCerrar }) {
           title="Las 17 columnas entran siempre en el ancho de la hoja; con letra muy grande alguna palabra larga se parte en dos renglones.">
           Con letra ${tam} alguna palabra larga se parte: con ${tam - 1} entra más holgado.</span>`}
         <div style="margin-left:auto" class="fila">
-          <button class="btn" onClick=${() => window.print()}>Imprimir / guardar PDF</button>
+          <button class="btn" disabled=${!paradasImpresion.length} onClick=${() => window.print()}>
+            Imprimir / guardar PDF${paradasDelDia.length ? ` (${paradasImpresion.length})` : ''}</button>
           <button class="btn sec" onClick=${alCerrar}>Cerrar</button>
         </div>
       </div>
@@ -6121,10 +6144,31 @@ function HojaRuta({ gira, paradas, alCerrar }) {
         <div class="mini no-imprimir" style="margin:-6px 0 10px">En la hoja impresa este
           encabezado se repite solo al principio de cada página, junto con los títulos de columna.</div>
 
+        ${!!paradasDelDia.length && html`<div class="no-imprimir seleccion-hoja" style="margin-bottom:12px">
+          <div class="fila" style="justify-content:space-between;align-items:baseline;margin-bottom:5px">
+            <b class="mini">Qué trabajos van en la hoja impresa</b>
+            <button class="btn sec chico" onClick=${alternarTodos}>
+              ${todosTildados ? 'Destildar todos' : 'Tildar todos'}</button>
+          </div>
+          <div style="max-height:200px;overflow:auto;border:1px solid var(--borde);border-radius:8px;
+            padding:4px 10px;background:var(--papel)">
+            ${paradasDelDia.map(t => html`<label key=${t.id} class="fila" style="gap:8px;padding:3px 0;cursor:pointer">
+              <input type="checkbox" style="width:auto" checked=${seleccion.has(t.id)}
+                onChange=${() => alternarUno(t.id)} />
+              <span class="mini">${t.cliente_nombre || '—'} · ${t.n_serie || ''} ·
+                ${fecha(t.fecha_visita) || 'sin fecha'}${t.tipo_servicio ? ' · ' + t.tipo_servicio : ''}</span>
+            </label>`)}
+          </div>
+          <div class="mini" style="margin-top:3px">${paradasImpresion.length} de ${paradasDelDia.length}
+            trabajo${paradasDelDia.length === 1 ? '' : 's'} tildado${paradasImpresion.length === 1 ? '' : 's'} para imprimir.</div>
+        </div>`}
+
         ${!paradasDelDia.length ? html`<div class="vacio">
           ${diaFiltro ? 'Ese día no tiene trabajos asignados en esta gira.'
             : tecFiltro ? `${tecUnico ? tecUnico.nombre : 'Este técnico'} no tiene trabajos asignados en esta gira.`
             : 'Esta gira todavía no tiene trabajos asignados.'}
+        </div>` : !paradasImpresion.length ? html`<div class="vacio">
+          No hay ningún trabajo tildado para imprimir: marcá al menos uno en la lista de arriba.
         </div>` : grupos.map(([dia, lista]) => html`<div key=${dia || 'todo'} style="margin-bottom:14px">
           ${dia && html`<div class="titulo-dia">${corte === 'tecnico'
             ? dia
@@ -6147,7 +6191,7 @@ function HojaRuta({ gira, paradas, alCerrar }) {
           </div>
         </div>`)}
 
-        ${paradasDelDia.some(recienInstalado) && html`<div class="mini" style="margin:2px 0 8px">
+        ${paradasImpresion.some(recienInstalado) && html`<div class="mini" style="margin:2px 0 8px">
           <span class="et rojo">■</span> Equipo instalado hace menos de un mes: revisar si corresponde garantía.
         </div>`}
         <div class="pie-hoja mini">
@@ -7153,6 +7197,7 @@ function Cobranza() {
    --------------------------------------------------------------------- */
 function TablaFacturar({ trabajos, alCerrar }) {
   const caja = useRef(null);            // la caja que se desplaza de costado
+  const [marcando, setMarcando] = useState(false);
   useEffect(() => {
     document.body.classList.add('imprimiendo');
     return () => document.body.classList.remove('imprimiendo');
@@ -7169,11 +7214,47 @@ function TablaFacturar({ trabajos, alCerrar }) {
     { rot: 'Correo', val: t => t.cliente_correo }, { rot: 'Teléfono', val: t => t.cliente_telefono },
     { rot: 'Tipo de factura', val: t => t.tipo_factura },
     { rot: 'N° Serie', val: t => t.n_serie },
+    { rot: 'Ciudad', val: t => ciudadDe(t) }, { rot: 'Provincia', val: t => provinciaDe(t) },
+    { rot: 'N° Paradas', val: t => t.n_paradas },
     { rot: 'Concepto', val: t => t.concepto },
     { rot: 'Precio sin IVA', val: t => t.precio_sin_iva },
     { rot: 'Precio con IVA', val: t => Math.round((Number(t.precio_sin_iva) || 0) * (1 + ivaDe(t) / 100)) },
     { rot: 'Observaciones', val: t => t.obs_cobranza },
   ];
+
+  /* Al imprimir (o guardar el PDF) esta tabla, se entiende que la factura de
+     cada caso ya se le pasó a Administración -- Augusto lo pidió así: que
+     al imprimirla, "el estado de factura enviada a administración pase a
+     sí". Es el mismo campo que la columna "Solicitada" de la grilla de
+     Cobranza (factura_solicitada / fecha_solicitud_factura); acá sólo se
+     toca en los casos que todavía no estaban marcados -- a uno que ya
+     decía "sí" no se le pisa la fecha original. Si algún caso no se pudo
+     marcar (sin conexión y sin cola, conflicto con otro cambio, etc.) la
+     tabla se imprime igual: avisar y frenar la impresión por un problema
+     de guardado sería peor que un caso que haya que marcar a mano después. */
+  async function marcarSolicitadas() {
+    if (!puedeCobranza()) return;
+    const faltan = filas.filter(t => !t.factura_solicitada);
+    if (!faltan.length) return;
+    setMarcando(true);
+    let ok = 0, fallos = 0;
+    for (const t of faltan) {
+      try {
+        await actualizarTrabajo(t.id, { factura_solicitada: true,
+          fecha_solicitud_factura: t.fecha_solicitud_factura || hoyISO() }, t.actualizado_en);
+        ok++;
+      } catch (e) { fallos++; }
+    }
+    setMarcando(false);
+    if (ok) toast(`${ok} factura${ok === 1 ? '' : 's'} marcada${ok === 1 ? '' : 's'} como `
+      + `"enviada a Administración"`, 'ok');
+    if (fallos) toast(`${fallos} caso${fallos === 1 ? '' : 's'} no se ${fallos === 1 ? 'pudo' : 'pudieron'} marcar; `
+      + 'revisalo en la grilla de Cobranza', 'error');
+  }
+  async function imprimir() {
+    await marcarSolicitadas();
+    window.print();
+  }
 
   return html`<div class="fondo" style="justify-content:center;align-items:flex-start;padding:14px;overflow:auto">
     <div class="panel hoja-impresion" style="width:100%;max-width:1060px;background:var(--papel)">
@@ -7182,7 +7263,8 @@ function TablaFacturar({ trabajos, alCerrar }) {
         <span class="mini">${filas.length} caso${filas.length === 1 ? '' : 's'} seleccionado${filas.length === 1 ? '' : 's'}</span>
         <div style="margin-left:auto" class="fila">
           <button class="btn sec" onClick=${() => bajarCSV('para_facturar', cols, filas)}>Exportar CSV</button>
-          <button class="btn" onClick=${() => window.print()}>Imprimir / guardar PDF</button>
+          <button class="btn" disabled=${marcando} onClick=${imprimir}>
+            ${marcando ? 'Marcando…' : 'Imprimir / guardar PDF'}</button>
           <button class="btn sec" onClick=${alCerrar}>Cerrar</button>
         </div>
       </div>
@@ -7201,6 +7283,7 @@ function TablaFacturar({ trabajos, alCerrar }) {
             <thead><tr>
               <th>N° LL</th><th>Cliente</th><th>CUIT/CUIL/DNI</th>
               <th>Correo</th><th>Teléfono</th><th>Tipo de factura</th><th>N° Serie</th>
+              <th>Ciudad</th><th>Provincia</th><th>N° Paradas</th>
               <th>Concepto</th><th class="der">Sin IVA</th><th class="der">Con IVA</th>
               <th>Observaciones</th>
             </tr></thead>
@@ -7213,13 +7296,16 @@ function TablaFacturar({ trabajos, alCerrar }) {
                 <td>${t.cliente_telefono || ''}</td>
                 <td>${t.tipo_factura || ''}</td>
                 <td>${t.n_serie || ''}</td>
+                <td>${ciudadDe(t) || ''}</td>
+                <td>${provinciaDe(t) || ''}</td>
+                <td class="num">${t.n_paradas || ''}</td>
                 <td class="largo">${t.concepto || ''}</td>
                 <td class="num">${plata(t.precio_sin_iva)}</td>
                 <td class="num">${plata((Number(t.precio_sin_iva) || 0) * (1 + ivaDe(t) / 100))}</td>
                 <td class="largo">${t.obs_cobranza || ''}</td>
               </tr>`)}
               <tr style="border-top:2px solid var(--borde)">
-                <td colspan="8" class="der"><b>Totales</b></td>
+                <td colspan="11" class="der"><b>Totales</b></td>
                 <td class="num"><b>${plata(totalSinIva)}</b></td>
                 <td class="num"><b>${plata(totalConIva)}</b></td>
                 <td></td>
