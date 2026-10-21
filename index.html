@@ -8439,6 +8439,19 @@ const COLOR_CONTROL = {
 const PRIORIDADES_CONTROL = ['OK', 'REPROGRAMADO', 'PENDIENTE'];
 const SITUACIONES_COMPROMISO = ['Liberado', 'Liberado por concesión', 'En control', 'Control inicial',
   'Sin control', 'Sin montar en BP'];
+/* Color de fondo de cada situación, de más grave (rojo oscuro) a mejor
+   (verde oscuro) -- a pedido de Augusto. Se arma con color-mix() sobre
+   los mismos tokens que ya usa el resto de la aplicación (--error,
+   --alerta/naranja y amarillo de los gráficos, --ok), nunca con un color
+   escrito a mano, para que se vea bien tanto en modo claro como oscuro. */
+const COLOR_SITUACION_COMPROMISO = {
+  'Sin montar en BP':     'background:color-mix(in srgb, var(--error) 42%, var(--papel))',
+  'Sin control':          'background:color-mix(in srgb, var(--error) 15%, var(--papel))',
+  'Control inicial':      'background:color-mix(in srgb, var(--sv-2) 32%, var(--papel))',
+  'En control':           'background:color-mix(in srgb, var(--sv-4) 28%, var(--papel))',
+  'Liberado':             'background:color-mix(in srgb, var(--ok) 38%, var(--papel))',
+  'Liberado por concesión': 'background:color-mix(in srgb, var(--ok) 14%, var(--papel))',
+};
 const MOTORIZACIONES_CONTROL = ['Split', 'Cabezal', 'Silent', 'Cabezal Silent'];
 /* las filas sin inspector detallado se agrupan así, igual que en el informe */
 const SIN_INSPECTOR = 'Mixto';
@@ -8539,6 +8552,29 @@ function estadoSugerido(c, hoy = hoyISO()) {
   return 'NO CUMPLE';
 }
 
+/**
+ * La "situación" del equipo (SITUACIONES_COMPROMISO) que correspondería
+ * según los datos cargados -- a pedido de Augusto, para que deje de
+ * elegirse a mano. Necesita dos datos que antes no estaban separados:
+ *   · fecha_montaje_bp: cuándo se montó y reguló el equipo en el banco de
+ *     pruebas. Sin esto no se puede distinguir "Sin montar en BP" (más
+ *     grave: ni siquiera se montó) de "Sin control" (ya montado, pero
+ *     todavía sin ningún control) -- antes las dos se elegían a mano sin
+ *     que hubiera ninguna fecha que las separe.
+ *   · liberado_por_concesion: si la liberación fue una excepción. No sale
+ *     de ninguna fecha; se tilda a mano sólo en ese caso puntual.
+ * El resto (Control inicial / En control) se corta por la fecha de
+ * compromiso, tal como lo confirmó Augusto: todavía no llegó → Control
+ * inicial; ya pasó y sigue sin liberar → En control.
+ */
+function estadoCompromisoSugerido(c, hoy = hoyISO()) {
+  if (!soloFecha(c.fecha_montaje_bp)) return 'Sin montar en BP';
+  if (!soloFecha(c.fecha_primer_control)) return 'Sin control';
+  if (soloFecha(c.fecha_liberacion)) return c.liberado_por_concesion ? 'Liberado por concesión' : 'Liberado';
+  const comp = soloFecha(c.fecha_compromiso);
+  return (!comp || hoy < comp) ? 'Control inicial' : 'En control';
+}
+
 /** El primer llamado a la línea. Hoy es el dato cargado a mano; cuando
     exista el módulo de llamados, se cambia sólo esta función. */
 function primerLlamadoDe(c) { return soloFecha(c.fecha_primer_llamado); }
@@ -8592,6 +8628,7 @@ function enriquecerControles(controles, trabajos, equipos, hoy = hoyISO()) {
       dCtrlLib: diasEntre(c.fecha_primer_control, lib),
       dCompromiso: diasEntre(c.fecha_primer_control, c.fecha_compromiso),
       mesLib: lib ? lib.slice(0, 7) : null,
+      situacionCompromiso: estadoCompromisoSugerido(c, hoy),
     };
   });
 }
@@ -8690,8 +8727,8 @@ async function traerControles() {
 
 /** Lo que va a la base: sólo las columnas de la tabla, sin lo calculado */
 const CAMPOS_CONTROL = ['anio', 'semana', 'prioridad', 'codigo', 'motorizacion', 'destino',
-  'fecha_primer_control', 'cantidad_controles', 'fecha_compromiso', 'fecha_liberacion',
-  'fecha_original_stp', 'observaciones', 'estado_compromiso', 'estado', 'obs_reunion',
+  'fecha_montaje_bp', 'fecha_primer_control', 'cantidad_controles', 'fecha_compromiso', 'fecha_liberacion',
+  'fecha_original_stp', 'observaciones', 'estado_compromiso', 'liberado_por_concesion', 'estado', 'obs_reunion',
   'acuerdos', 'inspector', 'fecha_instalacion', 'fecha_primer_llamado'];
 const CAMPOS_REUNION = ['fecha_reunion', 'equipo', 'equipo_a_utilizar', 'comentario'];
 function soloCampos(obj, campos) {
@@ -8953,6 +8990,7 @@ function PlanSemanal({ filas, alAbrir, alNuevo }) {
           <${Th} campo="cantidad_controles" rot="Ctrl." orden=${orden} setOrden=${setOrden} clase="der" />
           <${Th} campo="fecha_compromiso" rot="Compromiso" orden=${orden} setOrden=${setOrden} />
           <${Th} campo="fecha_liberacion" rot="Liberación" orden=${orden} setOrden=${setOrden} />
+          <${Th} campo="situacionCompromiso" rot="Situación" orden=${orden} setOrden=${setOrden} />
           <${Th} campo="estado" rot="Estado" orden=${orden} setOrden=${setOrden} />
           <${Th} campo="inst" rot="Instalación" orden=${orden} setOrden=${setOrden} />
           <${Th} campo="llamado" rot="1er llamado" orden=${orden} setOrden=${setOrden} />
@@ -8972,13 +9010,14 @@ function PlanSemanal({ filas, alAbrir, alNuevo }) {
             <td class="num">${x.cantidad_controles ?? ''}</td>
             <td>${fecha(x.fecha_compromiso)}</td>
             <td>${x.fecha_liberacion ? fecha(x.fecha_liberacion) : html`<span class="mini">sin liberar</span>`}</td>
+            <td style=${COLOR_SITUACION_COMPROMISO[x.situacionCompromiso] || ''}>${x.situacionCompromiso}</td>
             <td><${Et} txt=${x.estado} mapa=${COLOR_CONTROL} /></td>
             <td title=${x.instDelMaestro ? 'Tomada del maestro de equipos' : ''}>${fecha(x.inst)}${x.instDelMaestro ? ' ·' : ''}</td>
             <td>${fecha(x.llamado)}</td>
             <td title="Sale sola del registro de service">${fecha(x.asistencia)}</td>
             <td class="recorte" title=${x.observaciones || ''}>${x.observaciones || ''}</td>
           </tr>`)}
-          ${!filtradas.length && html`<tr><td colspan="15" class="vacio">
+          ${!filtradas.length && html`<tr><td colspan="16" class="vacio">
             No hay controles con estos filtros.</td></tr>`}
         </tbody>
       </table>
@@ -8994,18 +9033,21 @@ function PlanSemanal({ filas, alAbrir, alNuevo }) {
 function exportarControles(filas) {
   const F = v => (v ? { f: soloFecha(v) } : null);
   const columnas = ['Año', 'Semana', 'Prioridad Otorgada', 'Código', 'País', 'Motorización', 'Destino',
-    'Fecha de primer control', 'Días entre entrega para control y fecha compromiso',
+    'Fecha de montaje en banco de pruebas', 'Fecha de primer control',
+    'Días entre entrega para control y fecha compromiso',
     'Cantidad de controles', 'Fecha Compromiso Entrega - Fecha reunión', 'Fecha Liberación',
-    'Fecha Original STP', 'Observaciones', 'Estado al día de compromiso de entrega', 'Estado',
+    'Liberado por concesión', 'Fecha Original STP', 'Observaciones',
+    'Estado al día de compromiso de entrega', 'Estado',
     'Observaciones en la reunión sobre equipos', 'Acuerdos mencionados en las reuniones', 'Inspector',
     'Fecha de instalación', 'Fecha de primer llamado a la línea de asistencia técnica',
     'Fecha de primer asistencia en garantía', 'Días Liberación→Instalación',
     'Días Instalación→Primer llamado', 'Días Instalación→Primera asistencia',
     'Días Control inicial→Liberación'];
   const datos = filas.map(x => [x.anio, x.semana, x.prioridad, x.codigo, x.pais || SIN_PAIS, x.motorizacion, x.destino,
-    F(x.fecha_primer_control), x.dCompromiso, x.cantidad_controles, F(x.fecha_compromiso),
-    x.fecha_liberacion ? F(x.fecha_liberacion) : 'NO LIBERADO', F(x.fecha_original_stp),
-    x.observaciones, x.estado_compromiso, x.estado, x.obs_reunion, x.acuerdos, x.inspector,
+    F(x.fecha_montaje_bp), F(x.fecha_primer_control), x.dCompromiso, x.cantidad_controles, F(x.fecha_compromiso),
+    x.fecha_liberacion ? F(x.fecha_liberacion) : 'NO LIBERADO', x.liberado_por_concesion ? 'SÍ' : 'NO',
+    F(x.fecha_original_stp),
+    x.observaciones, x.situacionCompromiso, x.estado, x.obs_reunion, x.acuerdos, x.inspector,
     F(x.inst), F(x.llamado), F(x.asistencia), x.dLibInst, x.dInstLlam, x.dInstAsis, x.dCtrlLib]);
   return bajarXlsx('Planificacion semanal', [{ nombre: 'Planificación Semanal', columnas, filas: datos }]);
 }
@@ -9024,14 +9066,22 @@ function FichaControl({ original, precarga, filas, alCerrar, alGuardar, alAbrir 
   const [msg, setMsg] = useState(null);
   const [confirmarBorrar, setConfirmarBorrar] = useState(false);
 
-  /* El estado se recalcula solo al cambiar las fechas, mientras quien carga
-     no lo haya elegido a mano (o sea, mientras coincida con el sugerido). */
+  /* El estado (y, desde ahora, la situación del compromiso) se recalculan
+     solos al cambiar las fechas que corresponda, mientras quien carga no
+     los haya elegido a mano (o sea, mientras coincidan con lo sugerido). */
   const sugerido = estadoSugerido(b);
+  const sugeridoCompromiso = estadoCompromisoSugerido(b);
+  const CAMPOS_SITUACION = ['fecha_montaje_bp', 'fecha_primer_control', 'fecha_compromiso',
+    'fecha_liberacion', 'liberado_por_concesion'];
   const cambiar = (k, v) => setB(prev => {
     const sig = { ...prev, [k]: v };
     if (['fecha_compromiso', 'fecha_liberacion'].includes(k)) {
       const antes = estadoSugerido(prev);
       if (!prev.estado || prev.estado === antes) sig.estado = estadoSugerido(sig);
+    }
+    if (CAMPOS_SITUACION.includes(k)) {
+      const antes = estadoCompromisoSugerido(prev);
+      if (!prev.estado_compromiso || prev.estado_compromiso === antes) sig.estado_compromiso = estadoCompromisoSugerido(sig);
     }
     /* La "prioridad otorgada" acompaña el estado real de la fila: mientras
        el equipo está en cola es un número (el orden manual de prioridad);
@@ -9136,12 +9186,16 @@ function FichaControl({ original, precarga, filas, alCerrar, alGuardar, alAbrir 
         </div>
         <div class="rejilla dos">${T('destino', 'Destino (cliente u obra)')}</div>
         <div class="rejilla">
+          ${T('fecha_montaje_bp', 'Fecha de montaje en banco de pruebas', 'date')}
           ${T('fecha_primer_control', 'Fecha de primer control', 'date')}
           ${T('cantidad_controles', 'Cantidad de controles', 'number')}
           ${T('fecha_compromiso', 'Fecha compromiso / reunión', 'date')}
           ${T('fecha_liberacion', 'Fecha de liberación', 'date')}
           ${T('fecha_original_stp', 'Fecha original STP', 'date')}
-          ${L('estado_compromiso', 'Estado al día del compromiso', SITUACIONES_COMPROMISO, 'dl-situacion')}
+          <div class="campo"><span>Liberado por concesión</span>
+            <label class="fila mini" style="gap:6px;cursor:pointer;padding-top:6px">
+              <input type="checkbox" style="width:auto" disabled=${!editable} checked=${!!b.liberado_por_concesion}
+                onChange=${e => cambiar('liberado_por_concesion', e.target.checked)} /> Sí</label></div>
         </div>
         <div class="rejilla">
           <${Sel} rot="Estado" valor=${b.estado} opts=${ESTADOS_CONTROL} disabled=${!editable}
@@ -9149,6 +9203,13 @@ function FichaControl({ original, precarga, filas, alCerrar, alGuardar, alAbrir 
           <div class="campo"><span>Según las fechas</span>
             <div class="mini" style="padding-top:6px">${sugerido
               ? html`correspondería <${Et} txt=${sugerido} mapa=${COLOR_CONTROL} />` : '—'}</div></div>
+          <${Sel} rot="Situación" valor=${b.estado_compromiso}
+            opts=${SITUACIONES_COMPROMISO} disabled=${!editable}
+            alCambiar=${v => cambiar('estado_compromiso', v)} />
+          <div class="campo"><span>Según los datos</span>
+            <div class="mini" style="padding-top:6px">${sugeridoCompromiso
+              ? html`correspondería <span style=${(COLOR_SITUACION_COMPROMISO[sugeridoCompromiso] || '')
+                  + ';padding:1px 8px;border-radius:999px'}>${sugeridoCompromiso}</span>` : '—'}</div></div>
           <div class="campo"><span>Días del 1er control al compromiso</span>
             <div style="padding-top:6px">${calc.dCompromiso ?? '—'}</div></div>
           <div class="campo"><span>Días del 1er control a la liberación</span>
