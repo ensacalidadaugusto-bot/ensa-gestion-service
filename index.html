@@ -10626,16 +10626,16 @@ function Tablero() {
 
 /* =====================================================================
    OBJETIVOS MENSUALES (sin técnico)
-   Augusto fija, mes a mes, una meta de mantenimientos (Service, Service
-   Proactivo y Asistencia Técnica) y una de facturación para TODA la
-   empresa -- no es la meta de un técnico en particular, se compara
-   contra el total de trabajos del mes sin importar quién los hizo. Por
-   eso el objetivo no lleva técnico asociado; Augusto lo pidió así:
-   "no necesito seleccionar técnico, esto solo debe verlo admin (fija
-   objetivos y los controla) y el rol carga y giras que es quien debe
-   cumplirlos". (La primera versión cargaba cada objetivo "para" un
-   técnico puntual; se sacó esa columna en sql/49_objetivos_sin_tecnico.sql
-   porque nunca se usó así: el total ya era de toda la empresa.)
+   Augusto fija, mes a mes, una meta de mantenimientos y una de
+   facturación para TODA la empresa -- no es la meta de un técnico en
+   particular, se compara contra el total de trabajos del mes sin
+   importar quién los hizo. Por eso el objetivo no lleva técnico
+   asociado; Augusto lo pidió así: "no necesito seleccionar técnico,
+   esto solo debe verlo admin (fija objetivos y los controla) y el rol
+   carga y giras que es quien debe cumplirlos". (La primera versión
+   cargaba cada objetivo "para" un técnico puntual; se sacó esa columna
+   en sql/49_objetivos_sin_tecnico.sql porque nunca se usó así: el total
+   ya era de toda la empresa.)
    Por el mismo motivo el panel entero sólo se muestra a quien tiene rol
    admin o carga (ver el llamado a <PanelObjetivos> en Tablero()): a
    nadie más le toca fijarlos ni cumplirlos.
@@ -10647,9 +10647,16 @@ function Tablero() {
    modificar o borrar un objetivo, aunque alguien arme el pedido a mano
    sin pasar por la pantalla.
    ===================================================================== */
-/* lo que cuenta como "mantenimiento" para el objetivo: ni garantías ni
-   el resto de los tipos de pedido, tal como lo pidió Augusto */
-const TIPOS_MANTENIMIENTO_OBJETIVO = ['Service', 'Service Proactivo', 'Asistencia Técnica'];
+/* Lo que cuenta como "mantenimiento" para el objetivo: TODO menos las
+   garantías (Garantía y Garantía de Service) -- corregido el 23/10/2026
+   a pedido de Augusto: "que me cuente todo como mantenimiento menos las
+   garantías y garantías de service". Antes era una lista cerrada de
+   sólo tres tipos (Service, Service Proactivo, Asistencia Técnica), que
+   sin querer dejaba afuera cualquier otro tipo de pedido real (por
+   ejemplo, Continuación de Trabajos). Usa el mismo prefijo "Garantía"
+   que ya excluye ambos tipos en el resto de la aplicación (ver
+   `.startsWith('Garantía')`, en el Registro de Service). */
+const esMantenimientoObjetivo = t => !String(t.tipo_pedido || '').startsWith('Garantía');
 const COLOR_OBJETIVO = { 'CUMPLIDO': 'verde', 'NO CUMPLE': 'rojo', 'EN CURSO': 'azul' };
 
 async function traerObjetivos() {
@@ -10721,7 +10728,7 @@ function ModalObjetivo({ obj, anioDefault, alCerrar, alGuardado }) {
         disabled=${!!obj} sinVacio alCambiar=${setMes} />
       <${Txt} rot="Año" tipo="number" valor=${anio} disabled=${!!obj} alCambiar=${v => setAnio(v ? String(v) : '')} />
     </div>
-    <${Txt} rot="Objetivo de mantenimientos (Service + Service Proactivo + Asistencia Técnica)"
+    <${Txt} rot="Objetivo de mantenimientos (todo tipo de pedido salvo garantías)"
       tipo="number" valor=${objMant} alCambiar=${setObjMant} />
     <${Txt} rot="Objetivo de facturación, sin IVA" tipo="number" valor=${objFact} alCambiar=${setObjFact} />
     <div class="fila" style="justify-content:${obj ? 'space-between' : 'flex-end'};margin-top:10px">
@@ -10763,7 +10770,7 @@ function PanelObjetivos({ anio, trabajos, hastaMes }) {
      cargarlo: es un único objetivo por mes para toda la empresa. */
   const realesDelMes = useCallback((periodo) => {
     const delMes = trabajos.filter(t => String(t.fecha_visita || '').slice(0, 7) === periodo);
-    return { mant: delMes.filter(t => TIPOS_MANTENIMIENTO_OBJETIVO.includes(t.tipo_pedido)).length,
+    return { mant: delMes.filter(esMantenimientoObjetivo).length,
       fact: delMes.reduce((a, t) => a + (Number(t.precio_sin_iva) || 0), 0) };
   }, [trabajos]);
 
