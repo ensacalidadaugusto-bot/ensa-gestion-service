@@ -10647,16 +10647,28 @@ function Tablero() {
    modificar o borrar un objetivo, aunque alguien arme el pedido a mano
    sin pasar por la pantalla.
    ===================================================================== */
-/* Lo que cuenta como "mantenimiento" para el objetivo: TODO menos las
-   garantías (Garantía y Garantía de Service) -- corregido el 23/10/2026
-   a pedido de Augusto: "que me cuente todo como mantenimiento menos las
-   garantías y garantías de service". Antes era una lista cerrada de
-   sólo tres tipos (Service, Service Proactivo, Asistencia Técnica), que
-   sin querer dejaba afuera cualquier otro tipo de pedido real (por
-   ejemplo, Continuación de Trabajos). Usa el mismo prefijo "Garantía"
-   que ya excluye ambos tipos en el resto de la aplicación (ver
-   `.startsWith('Garantía')`, en el Registro de Service). */
-const esMantenimientoObjetivo = t => !String(t.tipo_pedido || '').startsWith('Garantía');
+/* Lo que cuenta como "mantenimiento" para el objetivo: TODO tipo de
+   pedido salvo los que están explícitamente excluidos -- corregido el
+   23/10/2026 a pedido de Augusto: "que me cuente todo como mantenimiento
+   menos las garantías y garantías de service". Antes era una lista
+   cerrada de sólo tres tipos (Service, Service Proactivo, Asistencia
+   Técnica), que sin querer dejaba afuera cualquier otro tipo de pedido
+   real (por ejemplo, Continuación de Trabajos).
+   Ampliación del mismo día: "venta derepuestos, instalacion pendiente,
+   extra instalación, reinstalacion tampoco deben contarse" -- ninguno de
+   estos es un mantenimiento real (uno es una venta, los otros tres son
+   instalación, no service), así que se suman a la lista de exclusión
+   junto con las garantías (que siguen excluidas por prefijo, igual que
+   en el resto de la aplicación, vía `.startsWith('Garantía')`).
+   Segunda ampliación del mismo día: "retiro de efectivo tampoco!" -- un
+   retiro de efectivo no es un mantenimiento, así que se suma también a
+   la lista de exclusión. */
+const TIPOS_EXCLUIDOS_OBJETIVO = new Set(['Venta de Repuestos', 'Instalación Pendiente',
+  'Extra Instalación', 'Reinstalación', 'Retiro de efectivo']);
+const esMantenimientoObjetivo = t => {
+  const tipo = String(t.tipo_pedido || '');
+  return !tipo.startsWith('Garantía') && !TIPOS_EXCLUIDOS_OBJETIVO.has(tipo);
+};
 const COLOR_OBJETIVO = { 'CUMPLIDO': 'verde', 'NO CUMPLE': 'rojo', 'EN CURSO': 'azul' };
 
 async function traerObjetivos() {
@@ -10728,7 +10740,7 @@ function ModalObjetivo({ obj, anioDefault, alCerrar, alGuardado }) {
         disabled=${!!obj} sinVacio alCambiar=${setMes} />
       <${Txt} rot="Año" tipo="number" valor=${anio} disabled=${!!obj} alCambiar=${v => setAnio(v ? String(v) : '')} />
     </div>
-    <${Txt} rot="Objetivo de mantenimientos (todo tipo de pedido salvo garantías)"
+    <${Txt} rot="Objetivo de mantenimientos (no incluye garantías, ventas de repuestos, instalaciones ni retiros de efectivo)"
       tipo="number" valor=${objMant} alCambiar=${setObjMant} />
     <${Txt} rot="Objetivo de facturación, sin IVA" tipo="number" valor=${objFact} alCambiar=${setObjFact} />
     <div class="fila" style="justify-content:${obj ? 'space-between' : 'flex-end'};margin-top:10px">
