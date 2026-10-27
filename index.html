@@ -10662,17 +10662,53 @@ function Tablero() {
    en el resto de la aplicación, vía `.startsWith('Garantía')`).
    Segunda ampliación del mismo día: "retiro de efectivo tampoco!" -- un
    retiro de efectivo no es un mantenimiento, así que se suma también a
-   la lista de exclusión. */
+   la lista de exclusión.
+
+   Ampliación del 26/10/2026: en vez de que esto quede fijo en el código,
+   Augusto pidió un filtro para elegir, pantalla por pantalla, qué tipos
+   de pedido cuentan y cuáles no (sólo el administrador lo edita: ver
+   <ModalTiposMantenimiento> y sql/51_objetivos_tipos_mantenimiento.sql).
+   Lo de arriba (garantías por prefijo + TIPOS_EXCLUIDOS_OBJETIVO) queda
+   como el criterio POR DEFECTO: se usa tal cual mientras el administrador
+   no guardó nunca el filtro, y también como respaldo para cualquier tipo
+   de pedido nuevo que todavía no tenga una fila guardada en la tabla
+   (por ejemplo, uno que se agregue al catálogo después de la última vez
+   que se guardó el filtro). Una vez que hay una fila guardada para un
+   tipo puntual, esa fila manda por sobre el valor por defecto. */
 const TIPOS_EXCLUIDOS_OBJETIVO = new Set(['Venta de Repuestos', 'Instalación Pendiente',
   'Extra Instalación', 'Reinstalación', 'Retiro de efectivo']);
-const esMantenimientoObjetivo = t => {
+const esMantenimientoObjetivoPorDefecto = t => {
   const tipo = String(t.tipo_pedido || '');
   return !tipo.startsWith('Garantía') && !TIPOS_EXCLUIDOS_OBJETIVO.has(tipo);
+};
+/** config: filas de objetivos_tipos_mantenimiento ([{tipo_pedido, cuenta}, ...]) ya cargadas,
+    o null/[]/undefined si todavía no se cargaron o el administrador nunca guardó el filtro --
+    en ese caso se aplica el criterio por defecto de arriba. */
+const esMantenimientoObjetivo = (t, config) => {
+  const tipo = String(t.tipo_pedido || '');
+  const fila = config && config.find(x => x.tipo_pedido === tipo);
+  return fila ? !!fila.cuenta : esMantenimientoObjetivoPorDefecto(t);
 };
 const COLOR_OBJETIVO = { 'CUMPLIDO': 'verde', 'NO CUMPLE': 'rojo', 'EN CURSO': 'azul' };
 
 async function traerObjetivos() {
   return traerTodo('objetivos_mensuales', { campo: 'anio', asc: false });
+}
+
+/** el filtro de qué tipos de pedido cuentan como mantenimiento (sql/51) */
+async function traerTiposMantenimiento() {
+  return traerTodo('objetivos_tipos_mantenimiento', { campo: 'tipo_pedido', asc: true });
+}
+
+/** guarda de una sola vez el estado de TODOS los tipos de pedido del filtro
+    (filas: [{tipo_pedido, cuenta}, ...], uno por cada opción del catálogo) */
+async function guardarTiposMantenimiento(filas) {
+  const { data, error } = await cliente().from('objetivos_tipos_mantenimiento')
+    .upsert(filas, { onConflict: 'tipo_pedido' }).select('*');
+  if (error) throw new Error('La base rechazó el filtro: ' + error.message);
+  if (!data || data.length !== filas.length) throw new Error('La base no guardó el filtro. No dio error: '
+    + 'directamente no lo guardó, que es lo que pasa cuando quien pide el cambio no es administrador.');
+  return data;
 }
 
 /** inserta o reemplaza el objetivo de un año y mes puntual (uno por mes, sin técnico) */
@@ -10740,7 +10776,7 @@ function ModalObjetivo({ obj, anioDefault, alCerrar, alGuardado }) {
         disabled=${!!obj} sinVacio alCambiar=${setMes} />
       <${Txt} rot="Año" tipo="number" valor=${anio} disabled=${!!obj} alCambiar=${v => setAnio(v ? String(v) : '')} />
     </div>
-    <${Txt} rot="Objetivo de mantenimientos (no incluye garantías, ventas de repuestos, instalaciones ni retiros de efectivo)"
+    <${Txt} rot="Objetivo de mantenimientos (según el filtro de actividades, ver 'Qué cuenta como mantenimiento')"
       tipo="number" valor=${objMant} alCambiar=${setObjMant} />
     <${Txt} rot="Objetivo de facturación, sin IVA" tipo="number" valor=${objFact} alCambiar=${setObjFact} />
     <div class="fila" style="justify-content:${obj ? 'space-between' : 'flex-end'};margin-top:10px">
@@ -10753,11 +10789,71 @@ function ModalObjetivo({ obj, anioDefault, alCerrar, alGuardado }) {
   <//>`;
 }
 
+/** filtro de qué tipos de pedido cuentan como mantenimiento del objetivo (sql/51) --
+    SÓLO administrador: a nadie más le toca elegir qué actividades se consideran.
+    config: las filas ya guardadas ([{tipo_pedido, cuenta}, ...]), o [] si nunca se guardó
+    nada todavía (en ese caso se parte del criterio por defecto, ver más arriba). */
+function ModalTiposMantenimiento({ config, alCerrar, alGuardado }) {
+  const tipos = opciones('tipo_pedido');
+  const [cuenta, setCuenta] = useState(() => Object.fromEntries(
+    tipos.map(tp => [tp, esMantenimientoObjetivo({ tipo_pedido: tp }, config)])));
+  const [guardando, setGuardando] = useState(false);
+
+  const marcarTodos = valor => setCuenta(Object.fromEntries(tipos.map(tp => [tp, valor])));
+
+  async function guardar() {
+    setGuardando(true);
+    try {
+      const filas = tipos.map(tp => ({ tipo_pedido: tp, cuenta: !!cuenta[tp] }));
+      const data = await guardarTiposMantenimiento(filas);
+      toast('Filtro de mantenimiento guardado', 'ok');
+      alGuardado(data);
+      alCerrar();
+    } catch (e) { toast('No se pudo guardar: ' + (e.message || e), 'error'); }
+    setGuardando(false);
+  }
+
+  return html`<${Modal} titulo="Qué cuenta como mantenimiento" alCerrar=${alCerrar} ancho=${520}>
+    <p class="mini">Tildá qué tipos de pedido suman hacia el <b>objetivo de mantenimientos</b> del
+      mes (el de facturación sigue sumando todo, sin filtrar). Por default vienen destildadas las
+      garantías y lo que no es un service -- ventas de repuestos, instalaciones y retiros de
+      efectivo -- pero se puede cambiar cualquiera.</p>
+    ${!tipos.length && html`<div class="aviso">No hay ningún tipo de pedido cargado en el catálogo
+      (Admin → Listas).</div>`}
+    ${!!tipos.length && html`<div class="fila" style="gap:8px;margin-bottom:8px">
+      <button class="btn sec chico" onClick=${() => marcarTodos(true)}>Marcar todos</button>
+      <button class="btn sec chico" onClick=${() => marcarTodos(false)}>Desmarcar todos</button>
+    </div>
+    <div class="tabla-caja" style="max-height:360px">
+      <table class="grilla">
+        <thead><tr><th>Tipo de pedido</th><th class="der">Cuenta como mantenimiento</th></tr></thead>
+        <tbody>
+          ${tipos.map(tp => html`<tr key=${tp}>
+            <td>${tp}</td>
+            <td class="der"><input type="checkbox" checked=${!!cuenta[tp]}
+              onChange=${e => setCuenta(c => ({ ...c, [tp]: e.target.checked }))} /></td>
+          </tr>`)}
+        </tbody>
+      </table>
+    </div>`}
+    <div class="fila" style="justify-content:flex-end;margin-top:10px">
+      <button class="btn sec" onClick=${alCerrar}>Cancelar</button>
+      <button class="btn" disabled=${guardando || !tipos.length} onClick=${guardar}>
+        ${guardando ? 'Guardando…' : 'Guardar'}</button>
+    </div>
+  <//>`;
+}
+
 /** se llama sólo si enRol('admin', 'carga'): a nadie más le toca fijar ni cumplir el objetivo */
 function PanelObjetivos({ anio, trabajos, hastaMes }) {
   const [datos, setDatos] = useState(null);     // null = todavía cargando
   const [error, setError] = useState(null);
   const [modal, setModal] = useState(null);      // null | {} (nuevo) | objetivo existente
+  // filtro de qué tipos de pedido cuentan como mantenimiento (sql/51); [] = todavía
+  // cargando, o el administrador nunca lo guardó -- en ese caso se usa el criterio
+  // por defecto (ver esMantenimientoObjetivoPorDefecto), no es un error
+  const [tiposConfig, setTiposConfig] = useState([]);
+  const [modalTipos, setModalTipos] = useState(false);
 
   const recargar = useCallback(async () => {
     setError(null);
@@ -10768,6 +10864,10 @@ function PanelObjetivos({ anio, trabajos, hastaMes }) {
         ? 'Falta correr en Supabase los scripts 48_objetivos_mensuales.sql y 49_objetivos_sin_tecnico.sql.'
         : (e.message || String(e)));
     }
+    // el filtro vive en una tabla aparte (sql/51): si todavía no se corrió ese script
+    // no tiene que tirar abajo el resto del panel, se sigue con el criterio por defecto
+    try { setTiposConfig(await traerTiposMantenimiento()); }
+    catch (e) { setTiposConfig([]); }
   }, []);
   useEffect(() => { recargar(); }, []);
 
@@ -10782,9 +10882,9 @@ function PanelObjetivos({ anio, trabajos, hastaMes }) {
      cargarlo: es un único objetivo por mes para toda la empresa. */
   const realesDelMes = useCallback((periodo) => {
     const delMes = trabajos.filter(t => String(t.fecha_visita || '').slice(0, 7) === periodo);
-    return { mant: delMes.filter(esMantenimientoObjetivo).length,
+    return { mant: delMes.filter(t => esMantenimientoObjetivo(t, tiposConfig)).length,
       fact: delMes.reduce((a, t) => a + (Number(t.precio_sin_iva) || 0), 0) };
-  }, [trabajos]);
+  }, [trabajos, tiposConfig]);
 
   const filas = useMemo(() => delAnio.map(ob => {
     const periodo = `${anio}-${String(ob.mes).padStart(2, '0')}`;
@@ -10815,7 +10915,10 @@ function PanelObjetivos({ anio, trabajos, hastaMes }) {
   return html`<section class="sector s1 objetivos">
     <div class="fila" style="justify-content:space-between;align-items:baseline">
       <h3 class="rot-sector">Objetivos — ${anio}</h3>
-      ${esAdmin() && html`<button class="btn sec chico" onClick=${() => setModal({})}>+ Agregar objetivo</button>`}
+      ${esAdmin() && html`<div class="fila" style="gap:8px">
+        <button class="btn sec chico" onClick=${() => setModalTipos(true)}>Qué cuenta como mantenimiento</button>
+        <button class="btn sec chico" onClick=${() => setModal({})}>+ Agregar objetivo</button>
+      </div>`}
     </div>
     ${!filas.length && html`<div class="aviso">Todavía no se cargó ningún objetivo para ${anio}.
       ${esAdmin() ? 'Usá "Agregar objetivo" para fijar la meta de un mes.' : ''}</div>`}
@@ -10843,6 +10946,8 @@ function PanelObjetivos({ anio, trabajos, hastaMes }) {
     </div>`}
     ${modal && html`<${ModalObjetivo} obj=${modal.id ? modal : null} anioDefault=${anio}
       alCerrar=${() => setModal(null)} alGuardado=${alGuardado} />`}
+    ${modalTipos && esAdmin() && html`<${ModalTiposMantenimiento} config=${tiposConfig}
+      alCerrar=${() => setModalTipos(false)} alGuardado=${setTiposConfig} />`}
   </section>`;
 }
 
