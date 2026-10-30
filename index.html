@@ -4801,14 +4801,24 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
                    solapa Facturación (no se guarda un monto aparte: si el precio del
                    trabajo se edita después, éste lo sigue), puesto acá al lado de
                    "Cierre" para no tener que volver arriba a buscarlo justo en el
-                   caso que importa: factura ya enviada y todavía sin cobrar.
+                   caso que importa: factura ya enviada/solicitada y todavía sin
+                   cobrar.
                    Originalmente con los mismos roles que ya ven montos en esta
                    solapa (puedeMontos()); el mismo día Augusto pidió que Mateo
                    (carga) también lo vea -- "que el usuario mateo si pueda ver la
                    consigna que te hice hoy" -- así que acá se hace una excepción
                    puntual a propósito: carga sigue sin ver "Precio sin IVA" ni el
-                   resto de los importes de esta solapa, pero este dato puntual sí. */
-                (puedeMontos() || enRol('carga')) && b2.facturado === 'SI' && cierreQueCorresponde(b2) === 'ABIERTO' && html`
+                   resto de los importes de esta solapa, pero este dato puntual sí.
+                   Y, probándolo con un caso real (LL1822: Facturado/Enviado todavía
+                   en "EN CURSO", pero con "Factura solicitada: Sí" ya cargado),
+                   Augusto pidió ampliarlo: no hace falta esperar a que alguien pase
+                   Facturado/Enviado a "SI" a mano -- con que la factura ya se haya
+                   SOLICITADO (factura_solicitada, el mismo campo que ahora se marca
+                   solo al armar la tabla para facturar) alcanza igual que con
+                   facturado = "SI". */
+                (puedeMontos() || enRol('carga'))
+                  && (b2.facturado === 'SI' || !!b2.factura_solicitada)
+                  && cierreQueCorresponde(b2) === 'ABIERTO' && html`
                 <${Dato} rot="Monto facturado, pendiente de cobro" ancho=${170}
                   val=${html`<${Et} txt=${plata((Number(b2.precio_sin_iva) || 0) * (1 + ivaDe(b2) / 100))} color="ambar" />`} />`}
             </div>
