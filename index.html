@@ -7272,6 +7272,17 @@ function TablaFacturar({ trabajos, alCerrar }) {
     document.body.classList.add('imprimiendo');
     return () => document.body.classList.remove('imprimiendo');
   }, []);
+  /* A pedido de Augusto (30/10/2026): "Cuando en el modulo cobranza, se
+     arma una tabla para facturar, que me la marque automaticamente como
+     solicitada a la factura" -- antes esto sólo pasaba al imprimir o
+     guardar el PDF (más abajo, imprimir()); ahora se dispara apenas se
+     arma la tabla (al abrir esta pantalla, con el botón "Armar tabla
+     para facturar" de Cobranza), así ya queda marcada aunque el usuario
+     sólo la exporte a CSV o se quede mirándola sin llegar a imprimirla.
+     marcarSolicitadas() sigue siendo segura de llamar más de una vez: ya
+     filtra los casos que faltan, así que repetirla al imprimir no hace
+     nada de más. */
+  useEffect(() => { marcarSolicitadas(); }, []);
 
   const filas = useMemo(() => [...trabajos]
     .sort((a, b) => (a.cliente_nombre || '').localeCompare(b.cliente_nombre || '', 'es')), [trabajos]);
@@ -7747,12 +7758,13 @@ function periodoDe(t) {
    --------------------------------------------------------------------- */
 async function traerProductividad(periodo) {
   const db = cliente();
-  const [valores, categorias, items, textos, configs] = await Promise.all([
+  const [valores, categorias, items, textos, configs, cierreR] = await Promise.all([
     db.from('productividad_valores').select('*').eq('periodo', periodo),
     db.from('productividad_categorias').select('*'),
     db.from('productividad_items').select('*').eq('periodo', periodo),
     db.from('productividad_tecnico').select('*').eq('periodo', periodo),
     db.from('productividad_config').select('*').eq('periodo', periodo),
+    db.from('productividad_cierre').select('*').eq('periodo', periodo).maybeSingle(),
   ]);
   const err = [valores, categorias, items, textos, configs].find(r => r.error);
   if (err) throw new Error(err.error.message);
@@ -7760,6 +7772,10 @@ async function traerProductividad(periodo) {
     valores: valores.data || [], categorias: categorias.data || [],
     items: items.data || [], textos: textos.data || [],
     configs: configs.data || [],
+    // productividad_cierre es nueva (sql/52): si todavía no se corrió ese
+    // script, la consulta da error y se toma como "mes abierto" (null),
+    // sin romper el resto de la pantalla.
+    cierre: cierreR.error ? null : (cierreR.data || null),
   };
 }
 
@@ -7768,10 +7784,6 @@ async function traerProductividad(periodo) {
    ===================================================================== */
 function Productividad() {
   const s = useS();
-  // El visualizador general entra a este módulo igual que a cualquier otro,
-  // pero no puede tocar nada: sólo el administrador corrige minutos, pagos
-  // y el cuadro de valores del mes.
-  const editable = esAdmin();
   const hoy = hoyISO();
   const [periodo, setPeriodo] = useState(hoy.slice(0, 7));
   const [tecnicoId, setTecnicoId] = useState(null);
@@ -7785,13 +7797,53 @@ function Productividad() {
     setError(null);
     try { setDatos(await traerProductividad(periodo)); }
     catch (e) {
-      setDatos({ valores: [], categorias: [], items: [], textos: [], configs: [] });
+      setDatos({ valores: [], categorias: [], items: [], textos: [], configs: [], cierre: null });
       setError(/relation|does not exist|no existe/i.test(e.message || '')
         ? 'Falta correr en Supabase el script 15_productividad.sql.'
         : (e.message || String(e)));
     }
   }, [periodo]);
   useEffect(() => { setDatos(null); recargar(); }, [periodo]);
+
+  /* A pedido de Augusto (30/10/2026): "en el modulo productividad
+     preguntarme cuando doy por finalizado o cerrado un mes de
+     productividad y dejar los valores guardados, que no se modifique
+     mas para que quede como historial, solo yo puedo editarlo por si
+     me equivoque en algo". Mientras el mes no está cerrado sigue
+     rigiendo la regla de siempre -- sólo el administrador corrige
+     minutos, pagos y el cuadro de valores -- pero una vez que lo cierra
+     ni él mismo edita directamente: tiene que reabrirlo a propósito
+     (más abajo, "Reabrir para corregir") para que una edición accidental
+     no pase desapercibida. La misma traba se repite en la base
+     (fn_bloquear_productividad_cerrada, sql/52), para que valga también
+     si alguien guarda un cambio sin pasar por esta pantalla. */
+  const cierre = datos?.cierre || null;
+  const cerrado = !!(cierre && cierre.cerrado);
+  const editable = esAdmin() && !cerrado;
+  const [confirmarCierre, setConfirmarCierre] = useState(false);
+  const [confirmarReapertura, setConfirmarReapertura] = useState(false);
+  const [cerrando, setCerrando] = useState(false);
+
+  async function cerrarMes() {
+    setCerrando(true);
+    const { error: e } = await cliente().from('productividad_cierre').upsert(
+      { periodo, cerrado: true, cerrado_en: new Date().toISOString(), cerrado_por: nombreUsuario() },
+      { onConflict: 'periodo' });
+    setCerrando(false); setConfirmarCierre(false);
+    if (e) return toast('No se pudo cerrar el mes: ' + e.message, 'error');
+    toast('Mes de productividad cerrado: queda como historial', 'ok');
+    recargar();
+  }
+  async function reabrirMes() {
+    setCerrando(true);
+    const { error: e } = await cliente().from('productividad_cierre').upsert(
+      { periodo, cerrado: false, reabierto_en: new Date().toISOString(), reabierto_por: nombreUsuario() },
+      { onConflict: 'periodo' });
+    setCerrando(false); setConfirmarReapertura(false);
+    if (e) return toast('No se pudo reabrir el mes: ' + e.message, 'error');
+    toast('Mes reabierto: ya se puede corregir', 'ok');
+    recargar();
+  }
 
   /* Ctrl+P tiene que salir igual que el botón: una sola hoja y sin minutos */
   useEffect(() => {
@@ -8114,10 +8166,19 @@ function Productividad() {
             <option value="">Sin definir</option>
             ${CATEGORIAS_TRABAJADOR.map(c => html`<option value=${c.id}>${c.rot}</option>`)}
           </select></label>`}
+        ${cerrado && html`<span class="et alarma"
+          title=${`Cerrado el ${fecha(cierre.cerrado_en, 1)}${cierre.cerrado_por ? ' por ' + cierre.cerrado_por : ''}. Queda como historial: para corregir algo hay que reabrirlo primero.`}>
+          🔒 Mes cerrado</span>`}
         <div class="fila" style="margin-left:auto">
           <button class="btn sec chico" onClick=${() => setVerCuadro(true)}>Valores del mes</button>
           <button class="btn sec chico" onClick=${exportar}>Exportar</button>
           <button class="btn sec chico" onClick=${imprimirProductividad}>Imprimir</button>
+          ${esAdmin() && !cerrado && html`<button class="btn sec chico"
+            title="Deja los valores de este mes guardados como historial: no se van a poder modificar hasta reabrirlo."
+            onClick=${() => setConfirmarCierre(true)}>Finalizar mes</button>`}
+          ${esAdmin() && cerrado && html`<button class="btn sec chico"
+            title="Vuelve a habilitar la edición de este mes, por si hay que corregir algo."
+            onClick=${() => setConfirmarReapertura(true)}>Reabrir para corregir</button>`}
         </div>
       </div>
       ${error && html`<div class="panel-cuerpo"><div class="aviso error">${error}</div></div>`}
@@ -8227,6 +8288,19 @@ function Productividad() {
 
     ${verCuadro && html`<${CuadroValores} periodo=${periodo} datos=${datos} editable=${editable}
       alCerrar=${() => setVerCuadro(false)} alGuardar=${recargar} />`}
+
+    ${confirmarCierre && html`<${Confirmar}
+      texto=${`¿Dar por finalizado ${nombreMes} de ${anio}? Los valores quedan guardados como
+        historial: ni vos vas a poder seguir corrigiendo minutos, pagos, el cuadro de valores
+        ni los textos de este mes, hasta que lo reabras a propósito.`}
+      textoSi=${cerrando ? 'Cerrando…' : 'Sí, finalizar el mes'}
+      alSi=${cerrarMes} alNo=${() => setConfirmarCierre(false)} />`}
+    ${confirmarReapertura && html`<${Confirmar}
+      texto=${`¿Reabrir ${nombreMes} de ${anio} para corregir algo? Mientras quede reabierto, se
+        puede volver a editar como un mes normal; no te olvides de "Finalizar mes" otra vez
+        cuando termines, para que siga quedando como historial.`}
+      textoSi=${cerrando ? 'Reabriendo…' : 'Sí, reabrir'}
+      alSi=${reabrirMes} alNo=${() => setConfirmarReapertura(false)} />`}
   </div>`;
 }
 
@@ -10242,6 +10316,13 @@ function ElevadoresAOfertar() {
         provincia: eq.provincia || (cli && cli.provincia) || '',
         direccion: eq.direccion || (cli && cli.direccion) || '',
         telefono: (cli && cli.telefono) || '',
+        // A pedido de Augusto (30/10/2026): "mateo y yo podemos marcar a un
+        // cliente como complicado para que ... nos aparezca un boton o
+        // cartel rojo que lo indique para tenerlo en cuenta a la hora de
+        // ofrecerlo". El cartel (abajo, en TablaOfertar) sale de esta marca
+        // del cliente (clientes.complicado / motivo_complicado, sql/52).
+        complicado: !!(cli && cli.complicado),
+        motivoComplicado: (cli && cli.motivo_complicado) || '',
       };
     })
       .filter(x => x.meses !== null && x.meses > MESES_SIN_ASISTENCIA)
@@ -10336,7 +10417,9 @@ function TablaOfertar({ prov, lista, alAbrir }) {
               onClick=${() => alAbrir(x.eq.id)}>
             <td class="congelada"><b>${x.eq.n_serie}</b></td>
             <td>${x.eq.modelo || ''}</td>
-            <td>${x.cli ? x.cli.nombre : ''}</td>
+            <td>${x.cli ? x.cli.nombre : ''}${x.complicado && html`<span class="et alarma"
+              style="margin-left:6px" title=${x.motivoComplicado || 'Cliente marcado como complicado'}
+              >⚠ Complicado</span>`}</td>
             <td>${x.ciudad}</td>
             <td title=${x.direccion}>${x.direccion}</td>
             <td>${x.telefono}</td>
@@ -11725,7 +11808,8 @@ function EditarCliente({ c, alCerrar, alAbrirTrabajo }) {
   async function guardar() {
     const db = cliente();
     const cuerpo = { nombre: b.nombre, cuit_dni: b.cuit_dni, ciudad: b.ciudad, provincia: b.provincia,
-      direccion: b.direccion, telefono: b.telefono, correo: b.correo, observaciones: b.observaciones };
+      direccion: b.direccion, telefono: b.telefono, correo: b.correo, observaciones: b.observaciones,
+      complicado: !!b.complicado, motivo_complicado: b.complicado ? (b.motivo_complicado || '') : '' };
     if (b.nuevo) {
       const { data, error } = await db.from('clientes').insert(cuerpo).select('*').single();
       if (error) return toast('No se pudo crear: ' + error.message, 'error');
@@ -11756,6 +11840,22 @@ function EditarCliente({ c, alCerrar, alAbrirTrabajo }) {
     <${Txt} rot="Correo" valor=${b.correo} alCambiar=${v => set2('correo', v)} disabled=${!editable} />
     <${Txt} rot="Observaciones" area=${2} valor=${b.observaciones} alCambiar=${v => set2('observaciones', v)}
       disabled=${!editable} />
+    ${/* A pedido de Augusto (30/10/2026): "mateo y yo podemos marcar a un
+         cliente como complicado para que cuando filtremos el modulo
+         elevadores a ofertar nos aparezca un boton o cartel rojo que lo
+         indique para tenerlo en cuenta a la hora de ofrecerlo". Mismo
+         permiso que el resto de la ficha de cliente (puedeMaestros()):
+         admin, oficina, carga (Mateo) y cobranza. El motivo es opcional,
+         para dejar por escrito por qué -- se ve como referencia del
+         cartel en "Elevadores a ofertar". */
+      html`<div class="campo"><span>Cliente complicado</span>
+        <label class="fila mini" style="gap:6px;cursor:pointer;padding-top:6px">
+          <input type="checkbox" style="width:auto" disabled=${!editable} checked=${!!b.complicado}
+            onChange=${e => set2('complicado', e.target.checked)} />
+          Marcar como complicado (sale un cartel rojo en "Elevadores a ofertar")</label></div>`}
+    ${b.complicado && html`<${Txt} rot="Motivo (opcional, se ve al pasar el mouse por el cartel)"
+      area=${2} valor=${b.motivo_complicado} alCambiar=${v => set2('motivo_complicado', v)}
+      disabled=${!editable} />`}
     ${!b.nuevo && html`<div>
       <div class="mini" style="margin:8px 0 4px"><b>Equipos:</b> ${equipos.map(e => e.n_serie).join(', ') || '—'}</div>
       <div class="mini" style="margin-bottom:4px"><b>Últimos trabajos</b></div>
