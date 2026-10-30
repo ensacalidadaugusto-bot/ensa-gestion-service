@@ -4801,10 +4801,14 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
                    solapa Facturación (no se guarda un monto aparte: si el precio del
                    trabajo se edita después, éste lo sigue), puesto acá al lado de
                    "Cierre" para no tener que volver arriba a buscarlo justo en el
-                   caso que importa: factura ya enviada y todavía sin cobrar. Mismos
-                   roles que ya ven montos en esta solapa (puedeMontos()); "carga" no
-                   lo ve, como el resto de los importes. */
-                puedeMontos() && b2.facturado === 'SI' && cierreQueCorresponde(b2) === 'ABIERTO' && html`
+                   caso que importa: factura ya enviada y todavía sin cobrar.
+                   Originalmente con los mismos roles que ya ven montos en esta
+                   solapa (puedeMontos()); el mismo día Augusto pidió que Mateo
+                   (carga) también lo vea -- "que el usuario mateo si pueda ver la
+                   consigna que te hice hoy" -- así que acá se hace una excepción
+                   puntual a propósito: carga sigue sin ver "Precio sin IVA" ni el
+                   resto de los importes de esta solapa, pero este dato puntual sí. */
+                (puedeMontos() || enRol('carga')) && b2.facturado === 'SI' && cierreQueCorresponde(b2) === 'ABIERTO' && html`
                 <${Dato} rot="Monto facturado, pendiente de cobro" ancho=${170}
                   val=${html`<${Et} txt=${plata((Number(b2.precio_sin_iva) || 0) * (1 + ivaDe(b2) / 100))} color="ambar" />`} />`}
             </div>
