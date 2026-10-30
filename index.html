@@ -4815,12 +4815,17 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
                    Facturado/Enviado a "SI" a mano -- con que la factura ya se haya
                    SOLICITADO (factura_solicitada, el mismo campo que ahora se marca
                    solo al armar la tabla para facturar) alcanza igual que con
-                   facturado = "SI". */
+                   facturado = "SI".
+                   Y, una vez viéndolo andar, pidió mostrar los dos importes --
+                   "mostra ambos, con y sin iva" -- en vez de sólo el de con IVA. */
                 (puedeMontos() || enRol('carga'))
                   && (b2.facturado === 'SI' || !!b2.factura_solicitada)
                   && cierreQueCorresponde(b2) === 'ABIERTO' && html`
-                <${Dato} rot="Monto facturado, pendiente de cobro" ancho=${170}
-                  val=${html`<${Et} txt=${plata((Number(b2.precio_sin_iva) || 0) * (1 + ivaDe(b2) / 100))} color="ambar" />`} />`}
+                <${Dato} rot="Monto facturado, pendiente de cobro" ancho=${230} val=${html`
+                  <div class="fila" style="gap:6px;flex-wrap:wrap">
+                    <${Et} txt=${'Sin IVA: ' + plata(Number(b2.precio_sin_iva) || 0)} color="ambar" />
+                    <${Et} txt=${'Con IVA: ' + plata((Number(b2.precio_sin_iva) || 0) * (1 + ivaDe(b2) / 100))} color="ambar" />
+                  </div>`} />`}
             </div>
 
             <div style="margin-top:10px">
