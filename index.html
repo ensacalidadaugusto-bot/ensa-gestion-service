@@ -4795,6 +4795,18 @@ function Ficha({ id, nuevo, alCerrar, precarga }) {
                   : html`<${Dato} rot="Fecha de pago" val=${fecha(b2.fecha_pago, 1)} ancho=${120} />`)}
               <${Dato} rot="Cierre" ancho=${130}
                 val=${b.estado === 'CUMPLIDO' ? html`<${MarcaCierre} t=${b2} />` : '—'} />
+              ${/* A pedido de Augusto (30/10/2026): "cuando un trabajo se envio la
+                   factura pero sigue abierto ... que me muestre el monto por el cual
+                   se solicitó la factura". Es el mismo importe de "Con IVA" de la
+                   solapa Facturación (no se guarda un monto aparte: si el precio del
+                   trabajo se edita después, éste lo sigue), puesto acá al lado de
+                   "Cierre" para no tener que volver arriba a buscarlo justo en el
+                   caso que importa: factura ya enviada y todavía sin cobrar. Mismos
+                   roles que ya ven montos en esta solapa (puedeMontos()); "carga" no
+                   lo ve, como el resto de los importes. */
+                puedeMontos() && b2.facturado === 'SI' && cierreQueCorresponde(b2) === 'ABIERTO' && html`
+                <${Dato} rot="Monto facturado, pendiente de cobro" ancho=${170}
+                  val=${html`<${Et} txt=${plata((Number(b2.precio_sin_iva) || 0) * (1 + ivaDe(b2) / 100))} color="ambar" />`} />`}
             </div>
 
             <div style="margin-top:10px">
