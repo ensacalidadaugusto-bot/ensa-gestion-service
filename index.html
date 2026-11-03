@@ -8972,6 +8972,7 @@ function colorPrioridad(valor, min, max) {
 function PlanSemanal({ filas, alAbrir, alNuevo }) {
   const [f, setF] = useState(FILTRO_CONTROLES);
   const [orden, setOrden] = useState({ campo: 'semana', asc: false });
+  const [verLiberadosPorMes, setVerLiberadosPorMes] = useState(false);
   const caja = useRef(null);
   const cambiar = (k, v) => setF({ ...f, [k]: v });
 
@@ -9066,6 +9067,16 @@ function PlanSemanal({ filas, alAbrir, alNuevo }) {
         </label>
         <button class="btn sec chico" onClick=${() => setF(FILTRO_CONTROLES)}>Limpiar</button>
         <div style="margin-left:auto" class="fila">
+          ${/* A pedido de Augusto (03/11/2026): "en modulo coordinación de
+               entrega de equipo, columna liberación calcularme y dejarme
+               tipo un boton indicador que muestre cuantos equipos se
+               liberaron en cada mes". Toma los MISMOS filtros que ya están
+               aplicados en la planilla (filtradas, no todas las filas): si
+               se filtra por año, inspector o zona, el desglose por mes
+               acompaña ese filtro, igual que ya hacen "liberados" y
+               "sin liberar" del resumen de más arriba. */
+            html`<button class="btn sec chico" title="Cuántos equipos de esta planilla (con el filtro de arriba) se liberaron en cada mes"
+              onClick=${() => setVerLiberadosPorMes(true)}>Liberados por mes</button>`}
           <button class="btn sec chico" title="Baja lo que estás viendo, con las mismas columnas de la planilla"
             onClick=${() => exportarControles(filtradas)}>Bajar en Excel (${filtradas.length})</button>
           ${puedeControles() && html`<button class="btn chico" onClick=${nuevo}>+ Nuevo control</button>`}
@@ -9131,7 +9142,41 @@ function PlanSemanal({ filas, alAbrir, alNuevo }) {
       La 1ª asistencia sale sola del registro de service. Una instalación marcada con “·” está tomada
       del maestro de equipos porque en el control quedó vacía.
     </div>
+    ${verLiberadosPorMes && html`<${ModalLiberadosPorMes} filas=${filtradas} alCerrar=${() => setVerLiberadosPorMes(false)} />`}
   </div>`;
+}
+
+/** A pedido de Augusto (03/11/2026): cuántos equipos se liberaron (columna
+    "Liberación", fecha_liberacion) en cada mes, sobre la misma planilla que
+    está mirando -- `filas` acá ya viene filtrada (es la `filtradas` de
+    PlanSemanal), no todos los controles. Más reciente primero, con un
+    total al pie. */
+function ModalLiberadosPorMes({ filas, alCerrar }) {
+  const porMes = useMemo(() => {
+    const m = new Map();
+    filas.forEach(x => {
+      if (!x.fecha_liberacion) return;
+      const k = String(x.fecha_liberacion).slice(0, 7);   // 'YYYY-MM'
+      m.set(k, (m.get(k) || 0) + 1);
+    });
+    return [...m.entries()].sort((a, b) => b[0].localeCompare(a[0]));   // mes más reciente arriba
+  }, [filas]);
+  const total = porMes.reduce((acc, [, n]) => acc + n, 0);
+  const nombreMes = k => { const [a, m] = k.split('-'); return `${MESES[Number(m) - 1]} ${a}`; };
+
+  return html`<${Modal} titulo="Equipos liberados por mes" alCerrar=${alCerrar} ancho=${420}>
+    <p class="mini">Según el filtro que tenías aplicado en la planilla: ${numAR(filas.length)}
+      equipo${filas.length === 1 ? '' : 's'} en total, ${numAR(total)} liberado${total === 1 ? '' : 's'}.</p>
+    <table class="grilla">
+      <thead><tr><th>Mes</th><th class="der">Liberados</th></tr></thead>
+      <tbody>
+        ${porMes.map(([k, n]) => html`<tr key=${k}><td>${nombreMes(k)}</td>
+          <td class="der"><b>${numAR(n)}</b></td></tr>`)}
+        ${!porMes.length && html`<tr><td colspan="2" class="vacio">Ningún equipo liberado con este filtro.</td></tr>`}
+      </tbody>
+      ${porMes.length ? html`<tfoot><tr><td><b>Total</b></td><td class="der"><b>${numAR(total)}</b></td></tr></tfoot>` : ''}
+    </table>
+  <//>`;
 }
 
 /** Bajar a Excel con las mismas columnas que tenía la planilla */
