@@ -8542,20 +8542,16 @@ const COLOR_CONTROL = {
 };
 /* lo que se ofrece al escribir: no es obligatorio elegir de la lista */
 const PRIORIDADES_CONTROL = ['OK', 'REPROGRAMADO', 'PENDIENTE'];
-const SITUACIONES_COMPROMISO = ['Liberado', 'Liberado por concesión', 'En control', 'Control inicial',
-  'Sin control', 'Sin montar en BP'];
-/* Color de fondo de cada situación, de más grave (rojo oscuro) a mejor
-   (verde oscuro) -- a pedido de Augusto. Se arma con color-mix() sobre
-   los mismos tokens que ya usa el resto de la aplicación (--error,
-   --alerta/naranja y amarillo de los gráficos, --ok), nunca con un color
-   escrito a mano, para que se vea bien tanto en modo claro como oscuro. */
+const SITUACIONES_COMPROMISO = ['Liberado', 'En control', 'Sin control'];
+/* Color de fondo de cada situación, de más grave (rojo) a mejor (verde)
+   -- a pedido de Augusto. Se arma con color-mix() sobre los mismos tokens
+   que ya usa el resto de la aplicación (--error, amarillo de los
+   gráficos, --ok), nunca con un color escrito a mano, para que se vea
+   bien tanto en modo claro como oscuro. */
 const COLOR_SITUACION_COMPROMISO = {
-  'Sin montar en BP':     'background:color-mix(in srgb, var(--error) 42%, var(--papel))',
   'Sin control':          'background:color-mix(in srgb, var(--error) 15%, var(--papel))',
-  'Control inicial':      'background:color-mix(in srgb, var(--sv-2) 32%, var(--papel))',
   'En control':           'background:color-mix(in srgb, var(--sv-4) 28%, var(--papel))',
   'Liberado':             'background:color-mix(in srgb, var(--ok) 38%, var(--papel))',
-  'Liberado por concesión': 'background:color-mix(in srgb, var(--ok) 14%, var(--papel))',
 };
 const MOTORIZACIONES_CONTROL = ['Split', 'Cabezal', 'Silent', 'Cabezal Silent'];
 /* las filas sin inspector detallado se agrupan así, igual que en el informe */
@@ -8660,24 +8656,25 @@ function estadoSugerido(c, hoy = hoyISO()) {
 /**
  * La "situación" del equipo (SITUACIONES_COMPROMISO) que correspondería
  * según los datos cargados -- a pedido de Augusto, para que deje de
- * elegirse a mano. Necesita dos datos que antes no estaban separados:
- *   · fecha_montaje_bp: cuándo se montó y reguló el equipo en el banco de
- *     pruebas. Sin esto no se puede distinguir "Sin montar en BP" (más
- *     grave: ni siquiera se montó) de "Sin control" (ya montado, pero
- *     todavía sin ningún control) -- antes las dos se elegían a mano sin
- *     que hubiera ninguna fecha que las separe.
- *   · liberado_por_concesion: si la liberación fue una excepción. No sale
- *     de ninguna fecha; se tilda a mano sólo en ese caso puntual.
- * El resto (Control inicial / En control) se corta por la fecha de
- * compromiso, tal como lo confirmó Augusto: todavía no llegó → Control
- * inicial; ya pasó y sigue sin liberar → En control.
+ * elegirse a mano.
+ *
+ * Simplificado el 03/11/2026, a pedido de Augusto: "la columna situación
+ * tambien debe cambiar automaticamente, si tiene fecha de liberación debe
+ * decir LIBERADO si tiene fecha de primer control pero no de liberado
+ * debe decir EN CONTROL y si no tiene fecha de primer control ni
+ * liberación debe decir SIN CONTROL". Ya no entran en la cuenta la fecha
+ * de montaje en banco de pruebas, la fecha de compromiso ni el casillero
+ * "Liberado por concesión" -- esos datos se siguen pudiendo cargar en la
+ * ficha (y se siguen bajando en el Excel), pero ya no cambian qué
+ * situación se sugiere ni qué opciones hay para elegir a mano. Antes
+ * había seis situaciones posibles (Sin montar en BP / Sin control /
+ * Control inicial / En control / Liberado / Liberado por concesión);
+ * ahora son sólo estas tres.
  */
-function estadoCompromisoSugerido(c, hoy = hoyISO()) {
-  if (!soloFecha(c.fecha_montaje_bp)) return 'Sin montar en BP';
-  if (!soloFecha(c.fecha_primer_control)) return 'Sin control';
-  if (soloFecha(c.fecha_liberacion)) return c.liberado_por_concesion ? 'Liberado por concesión' : 'Liberado';
-  const comp = soloFecha(c.fecha_compromiso);
-  return (!comp || hoy < comp) ? 'Control inicial' : 'En control';
+function estadoCompromisoSugerido(c) {
+  if (soloFecha(c.fecha_liberacion)) return 'Liberado';
+  if (soloFecha(c.fecha_primer_control)) return 'En control';
+  return 'Sin control';
 }
 
 /** El primer llamado a la línea. Hoy es el dato cargado a mano; cuando
@@ -9221,8 +9218,7 @@ function FichaControl({ original, precarga, filas, alCerrar, alGuardar, alAbrir 
      los haya elegido a mano (o sea, mientras coincidan con lo sugerido). */
   const sugerido = estadoSugerido(b);
   const sugeridoCompromiso = estadoCompromisoSugerido(b);
-  const CAMPOS_SITUACION = ['fecha_montaje_bp', 'fecha_primer_control', 'fecha_compromiso',
-    'fecha_liberacion', 'liberado_por_concesion'];
+  const CAMPOS_SITUACION = ['fecha_primer_control', 'fecha_liberacion'];
   const cambiar = (k, v) => setB(prev => {
     const sig = { ...prev, [k]: v };
     if (['fecha_compromiso', 'fecha_liberacion'].includes(k)) {
