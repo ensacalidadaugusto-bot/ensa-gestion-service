@@ -830,15 +830,14 @@ table.grilla.prod .volver{padding:1px 5px;font-size:11px;line-height:1.3;margin-
   vertical-align:middle}
 table.grilla.prod input.celda.amano{font-weight:700;
   box-shadow:inset 0 -2px 0 color-mix(in srgb, var(--alerta) 60%, transparent)}
-/* Las dos columnas de texto del mes (no son datos de la fila sino del
-   técnico entero) repiten el mismo valor en cada renglón -- antes se
-   mostraban una sola vez, centradas a la mitad de la planilla como una
-   celda combinada de Excel, pero al imprimirse en más de una hoja esa fila
-   del medio podía quedar en una página distinta, dejando la columna vacía
-   en el resto. Ahora son una columna más, con su raya y su franja como
-   cualquier otra. */
-table.grilla.prod td.texto-prod{white-space:pre-wrap;font-size:10.5px;color:var(--suave);
-  min-width:130px;border-left:1px solid var(--borde)}
+/* Las dos frases del mes ("Productividad semana planta" y "Bono 0
+   garantías de service") ya no son columna (no son datos de la fila sino
+   del técnico entero: repetirlas en cada renglón no tenía sentido). A
+   pedido de Augusto (03/11/2026) se muestran una sola vez, como
+   comentario al pie de la tabla, después de la fila de subtotal -- ver
+   ".comentario-prod" más abajo. */
+table.grilla.prod tr.comentario-prod td{font-size:10.5px;color:var(--suave);
+  white-space:pre-wrap;border-top:0;padding:3px 7px}
 /* el desglose por semana, arriba de la planilla */
 .semanas-prod{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 6px}
 .semanas-prod .sem{border:1px solid var(--borde);border-radius:8px;padding:6px 11px;
@@ -846,7 +845,7 @@ table.grilla.prod td.texto-prod{white-space:pre-wrap;font-size:10.5px;color:var(
 .semanas-prod .sem .dato{font-size:12.5px;margin:1px 0}
 /* el corte entre una semana y la siguiente: un respiro, sin rótulo */
 table.grilla.prod tr.nueva-semana td{border-top:2px solid var(--borde);padding-top:11px}
-table.grilla.prod tfoot td{position:sticky;bottom:0;background:var(--th);
+table.grilla.prod tfoot tr.subtotal td{position:sticky;bottom:0;background:var(--th);
   border-top:2px solid var(--borde);padding:7px}
 /* anchos: el técnico necesita lugar porque suelen ir dos nombres */
 table.grilla.prod th.p-n{width:64px}
@@ -859,7 +858,6 @@ table.grilla.prod th.p-estado{width:84px}
 table.grilla.prod th.p-tec{width:150px}
 table.grilla.prod th.p-min{width:92px}
 table.grilla.prod th.p-pago{width:112px}
-table.grilla.prod th.p-texto{width:150px}
 
 
 /* el técnico dado de baja sigue en la lista, pero apagado */
@@ -980,12 +978,11 @@ html.modo-papel table.grilla.prod th.p-n{width:5%}
 html.modo-papel table.grilla.prod th.p-mant{width:9.5%}
 html.modo-papel table.grilla.prod th.p-finst{width:7.5%}
 html.modo-papel table.grilla.prod th.p-fecha{width:5.5%}
-html.modo-papel table.grilla.prod th.p-cli{width:14.5%}
+html.modo-papel table.grilla.prod th.p-cli{width:22.5%}
 html.modo-papel table.grilla.prod th.p-serv{width:9.5%}
 html.modo-papel table.grilla.prod th.p-estado{width:7%}
-html.modo-papel table.grilla.prod th.p-tec{width:11.5%}
+html.modo-papel table.grilla.prod th.p-tec{width:19.5%}
 html.modo-papel table.grilla.prod th.p-pago{width:8.5%}
-html.modo-papel table.grilla.prod th.p-texto{width:8.5%}
 html.modo-papel table.grilla.prod th{font-size:8px;word-break:keep-all;overflow-wrap:normal}
 html.modo-papel table.grilla.prod td{padding:3px 4px;white-space:normal;
   overflow-wrap:break-word;word-break:normal;hyphens:none}
@@ -8072,6 +8069,20 @@ function Productividad() {
         && String(x.tecnico_id) === String(tecActual))), fila] }));
   }
 
+  /* Las dos frases del mes (no son datos de una fila sino del técnico
+     entero) se muestran una sola vez, como comentario al pie de la
+     planilla, DESPUÉS del SUBTOTAL SERVICE -- a pedido de Augusto
+     (03/11/2026): "sacale la columna productividad semana planta, esto
+     solo va como un comentario al finalizar la tabla al igual que el
+     bono 0 garantías de service" (el mismo cambio se aplicó también al
+     bono, que tenía el mismo problema).
+     Antes se probó mostrarlas como fila intermedia (una celda combinada,
+     a la mitad de la planilla) y se cambió a columna repetida porque, al
+     imprimirse en más de una hoja, esa fila del medio podía quedar en
+     una página distinta, dejando la columna vacía en el resto. Puesta AL
+     FINAL (en <tfoot>, después del subtotal) ese problema no se repite:
+     el pie de la tabla imprime una sola vez, en la última página, nunca
+     a la mitad de una hoja anterior. */
   async function guardarTexto(campos) {
     const fila = { periodo, tecnico_id: tecActual,
       semana_planta: texto.semana_planta || '', bono_garantias: texto.bono_garantias || '',
@@ -8234,8 +8245,9 @@ function Productividad() {
               onChange=${e => guardarTexto({ bono_garantias: e.target.value })}
               placeholder="Por ejemplo: $0" /></label>
         </div>
-        <div class="mini">Los dos se guardan solos al salir del recuadro. Salen impresos en las
-          últimas dos columnas de la planilla.</div>
+        <div class="mini">Los dos se guardan solos al salir del recuadro. Salen impresos como
+          comentario al final de la planilla, después del SUBTOTAL SERVICE -- no se repiten como
+          columna en cada fila.</div>
       </div>
     </div>
 
@@ -8254,8 +8266,6 @@ function Productividad() {
           <th class="p-tec">Técnico</th>
           <th class="der p-min">Tiempos MO<br />[Min]</th>
           <th class="der p-pago">Pago</th>
-          <th class="p-texto">Productividad<br />semana planta</th>
-          <th class="p-texto">Bono 0 garantías<br />de service</th>
         </tr></thead>
         <tbody>
           ${filas.map((f, i) => html`<tr key=${f.t.id}
@@ -8286,8 +8296,6 @@ function Productividad() {
                 title=${`Corregido a mano. Volver al valor calculado (${plata(f.sugerido)}).`}
                 onClick=${() => volverAlCuadro(f.t.id)}>↺</button>`}
               <span class="solo-impresion">${plata(f.pago)}</span></td>
-            <td class="texto-prod">${texto.semana_planta}</td>
-            <td class="texto-prod">${texto.bono_garantias}</td>
           </tr>`)}
         </tbody>
         <tfoot>
@@ -8295,7 +8303,12 @@ function Productividad() {
             <td colspan="9" class="der"><b>SUBTOTAL SERVICE</b></td>
             <td class="num p-min"><b>${totalMinutos.toLocaleString('es-AR')}</b></td>
             <td class="num"><b>${plata(subtotal)}</b></td>
-            <td colspan="2"></td>
+          </tr>
+          <tr class="comentario-prod">
+            <td colspan="11"><b>Productividad semana planta:</b> ${texto.semana_planta}</td>
+          </tr>
+          <tr class="comentario-prod">
+            <td colspan="11"><b>Bono 0 garantías de service:</b> ${texto.bono_garantias}</td>
           </tr>
         </tfoot>
       </table>
