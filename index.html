@@ -7425,10 +7425,43 @@ function TablaFacturar({ trabajos, alCerrar }) {
 /* ===== 65_encuestas.js ===== */
 /* =====================================================================
    MÓDULO 5 — ENCUESTAS DE SATISFACCIÓN
-   Los trabajos ya realizados, para ir marcando a quién se le mandó la
-   encuesta. Se filtra por mes y se exporta para el seguimiento.
+
+   Dos pestañas, a pedido de Augusto (04/11/2026): "dividime en encuestas
+   postventa (las que saca de registro de service) y encuestas de
+   instalaciones (me saca de la base de datos los equipos instalados)".
+
+   · Encuestas postventa (EncuestasPostventa, sin cambios): sale de
+     Registro de Service -- los trabajos CUMPLIDO -- y usa las columnas
+     encuesta_enviada/fecha_encuesta de "trabajos".
+   · Encuestas de instalaciones (EncuestasInstalaciones, nueva): sale
+     directo de la base de equipos instalados, no de los trabajos, y usa
+     sus propias columnas encuesta_instalacion_enviada/
+     fecha_encuesta_instalacion de "equipos" (sql/54) -- separadas de las
+     de postventa porque un mismo equipo tiene una sola encuesta de
+     instalación pero puede tener muchas visitas de postventa.
    ===================================================================== */
 function Encuestas() {
+  const [solapa, setSolapa] = useState('postventa');
+  const Pest = (k, rot) => html`<button class=${'tab-sec ' + (solapa === k ? 'on' : '')}
+    onClick=${() => setSolapa(k)}>${rot}</button>`;
+  return html`<div>
+    <div class="panel no-imprimir" style="margin-bottom:10px">
+      <div class="panel-cab">
+        <h2>Encuestas de satisfacción</h2>
+        <div class="fila pestanas">
+          ${Pest('postventa', 'Encuestas postventa')}
+          ${Pest('instalaciones', 'Encuestas de instalaciones')}
+        </div>
+      </div>
+    </div>
+    ${solapa === 'postventa' && html`<${EncuestasPostventa} />`}
+    ${solapa === 'instalaciones' && html`<${EncuestasInstalaciones} />`}
+  </div>`;
+}
+
+/* Encuestas postventa: igual que el módulo de antes de dividirlo, nombre
+   nuevo nomás. Sale de Registro de Service (trabajos CUMPLIDO). */
+function EncuestasPostventa() {
   const s = useS();
   const [busca, setBusca] = useState('');
   const [anio, setAnio] = useState('');
@@ -7636,6 +7669,202 @@ function Encuestas() {
     </div>
 
     ${fichaId && html`<${Ficha} id=${fichaId} alCerrar=${() => setFichaId(null)} />`}
+  </div>`;
+}
+
+/* Encuestas de instalaciones: sale de "equipos" (los que ya tienen
+   fecha de instalación cargada), no de los trabajos. No tiene técnico
+   -- equipos no guarda quién instaló -- ni ficha de trabajo para abrir;
+   se marca y se exporta directo desde esta misma tabla. */
+function EncuestasInstalaciones() {
+  const s = useS();
+  const [busca, setBusca] = useState('');
+  const [anio, setAnio] = useState('');
+  const [mes, setMes] = useState('');
+  const [estadoEnc, setEstadoEnc] = useState('pendientes');   // pendientes | enviadas | todas
+  const [orden, setOrden] = useState({ campo: 'fecha_instalacion', asc: false });
+  const [tope, setTope] = useState(300);
+  const caja = useRef(null);
+  const editable = puedeEncuestas();
+
+  /* Sólo equipos ya instalados: antes de eso no hay a quién encuestar */
+  const instalados = useMemo(() => s.equipos
+    .filter(eq => eq.fecha_instalacion)
+    .map(eq => {
+      const cli = s.clientes.find(c => c.id === eq.cliente_id);
+      return { ...eq,
+        cliente_nombre: (cli && cli.nombre) || '',
+        ciudad: eq.ciudad || (cli && cli.ciudad) || '',
+        provincia: eq.provincia || (cli && cli.provincia) || '' };
+    }), [s.equipos, s.clientes]);
+
+  const anios = useMemo(() => [...new Set(instalados
+    .map(eq => String(eq.fecha_instalacion || '').slice(0, 4)).filter(Boolean))]
+    .sort().reverse(), [instalados]);
+  const MESES_OPC = MESES.map((m, i) => ({ v: String(i + 1).padStart(2, '0'),
+    r: m[0].toUpperCase() + m.slice(1) }));
+
+  /* El período elegido, sin mirar todavía si la encuesta se mandó o no */
+  const delPeriodo = useMemo(() => {
+    const f = sinAcentos(busca);
+    return instalados.filter(eq => {
+      const d = String(eq.fecha_instalacion || '');
+      if (anio && d.slice(0, 4) !== anio) return false;
+      if (mes && d.slice(5, 7) !== mes) return false;
+      return !f || sinAcentos([eq.n_serie, eq.modelo, eq.cliente_nombre,
+        eq.ciudad, eq.provincia].join(' ')).includes(f);
+    });
+  }, [instalados, busca, anio, mes]);
+
+  const filtrados = useMemo(() => ordenar(delPeriodo.filter(eq =>
+    estadoEnc === 'todas' ? true
+      : estadoEnc === 'enviadas' ? eq.encuesta_instalacion_enviada : !eq.encuesta_instalacion_enviada), orden),
+    [delPeriodo, estadoEnc, orden]);
+
+  const enviadas = delPeriodo.filter(eq => eq.encuesta_instalacion_enviada).length;
+  const pendientes = delPeriodo.length - enviadas;
+
+  async function marcar(eq, si) {
+    const campos = { encuesta_instalacion_enviada: si,
+      fecha_encuesta_instalacion: si ? (eq.fecha_encuesta_instalacion || hoyISO()) : null };
+    const r = await actualizarYComprobar('equipos', eq.id, campos);
+    if (!r.ok) return toast(r.msg, 'error');
+    set({ equipos: S.equipos.map(x => x.id === eq.id ? { ...x, ...campos } : x) });
+  }
+
+  /* Marcar de a muchas: lo habitual es mandar la tanda del mes de una vez */
+  async function marcarTodas() {
+    const faltan = filtrados.filter(eq => !eq.encuesta_instalacion_enviada);
+    if (!faltan.length) return toast('No queda ninguna pendiente en este filtro', 'error');
+    if (!confirm(`¿Marcar como enviadas las ${faltan.length} encuestas que estás viendo?`)) return;
+    let ok = 0;
+    for (const eq of faltan) {
+      const r = await actualizarYComprobar('equipos', eq.id,
+        { encuesta_instalacion_enviada: true, fecha_encuesta_instalacion: hoyISO() });
+      if (r.ok) { set({ equipos: S.equipos.map(x => x.id === eq.id
+        ? { ...x, encuesta_instalacion_enviada: true, fecha_encuesta_instalacion: hoyISO() } : x) }); ok++; }
+    }
+    toast(`${ok} de ${faltan.length} marcadas como enviadas`, ok ? 'ok' : 'error');
+  }
+
+  const COLS = [
+    { rot: 'Serie', val: eq => eq.n_serie },
+    { rot: 'Modelo', val: eq => eq.modelo },
+    { rot: 'Cliente', val: eq => eq.cliente_nombre },
+    { rot: 'Ciudad y provincia', val: eq => [eq.ciudad, eq.provincia].filter(x => x && String(x).trim()).join(', ') },
+    { rot: 'Fecha de instalación', val: eq => fecha(eq.fecha_instalacion, 1) },
+    { rot: 'Encuesta enviada', val: eq => eq.encuesta_instalacion_enviada ? 'SI' : 'NO' },
+    { rot: 'Fecha de envío', val: eq => fecha(eq.fecha_encuesta_instalacion, 1) },
+  ];
+
+  async function exportar() {
+    if (!filtrados.length) return toast('No hay equipos para exportar con ese filtro', 'error');
+    toast(`Armando el Excel con ${filtrados.length} equipos…`);
+    try {
+      const periodo = [anio, mes ? MESES[Number(mes) - 1] : ''].filter(Boolean).join(' ');
+      const hojas = [
+        { nombre: 'Encuestas instalación',
+          columnas: COLS.map(c => c.rot),
+          filas: filtrados.map(eq => COLS.map(c => {
+            if (c.rot === 'Fecha de instalación') return eq.fecha_instalacion ? { f: eq.fecha_instalacion } : null;
+            if (c.rot === 'Fecha de envío') return eq.fecha_encuesta_instalacion ? { f: eq.fecha_encuesta_instalacion } : null;
+            const v = c.val(eq); return v === undefined || v === '' ? null : v;
+          })) },
+        { nombre: 'Resumen',
+          columnas: ['Dato', 'Valor'],
+          filas: [
+            ['Generado el', momento(new Date().toISOString())],
+            ['Generado por', nombreUsuario()],
+            ['Período', periodo || 'todo el historial'],
+            ['Equipos instalados en el período', delPeriodo.length],
+            ['Encuestas enviadas', enviadas],
+            ['Pendientes de enviar', pendientes],
+            ['Cobertura', delPeriodo.length
+              ? Math.round(enviadas / delPeriodo.length * 100) + '%' : '—'],
+            ['Filas exportadas', filtrados.length],
+            ...(estadoEnc !== 'todas' ? [['Se exportaron', estadoEnc === 'enviadas'
+              ? 'sólo las enviadas' : 'sólo las pendientes']] : []),
+          ] },
+      ];
+      await bajarXlsx(`Encuestas instalaciones${periodo ? ' - ' + periodo : ''}.xlsx`, hojas);
+      toast(`Exportadas ${filtrados.length} filas`, 'ok');
+    } catch (e) {
+      toast('No se pudo exportar: ' + (e.message || e), 'error');
+    }
+  }
+
+  return html`<div>
+    <div class="panel" style="margin-bottom:10px">
+      <div class="panel-cab">
+        ${[['pendientes', 'Pendientes de enviar'], ['enviadas', 'Ya enviadas'], ['todas', 'Todas']]
+          .map(([k, r]) => html`<button class=${'btn chico ' + (estadoEnc === k ? '' : 'sec')}
+            onClick=${() => { setEstadoEnc(k); setTope(300); }}>${r}</button>`)}
+        <input style="max-width:240px" placeholder="Buscar cliente, serie, modelo…" value=${busca}
+          onInput=${e => setBusca(e.target.value)} />
+        <${Sel} valor=${anio} opts=${anios} vacio="Año: todos" alCambiar=${v => setAnio(v || '')} />
+        <select style="width:auto" value=${mes} onChange=${e => setMes(e.target.value)}>
+          <option value="">Mes: todos</option>
+          ${MESES_OPC.map(m => html`<option value=${m.v}>${m.r}</option>`)}
+        </select>
+        <div style="margin-left:auto" class="fila">
+          ${editable && html`<button class="btn sec chico"
+            title="Marca como enviadas todas las que estás viendo"
+            onClick=${marcarTodas}>Marcar todas</button>`}
+          ${esAdmin() && html`<button class="btn chico" onClick=${exportar}>
+            Descargar reporte (${filtrados.length.toLocaleString('es-AR')})</button>`}
+        </div>
+      </div>
+      <div class="panel-cuerpo" style="padding:4px 12px">
+        <${Resumen} items=${[
+          ['equipos instalados', delPeriodo.length.toLocaleString('es-AR')],
+          ['encuestas enviadas', enviadas.toLocaleString('es-AR')],
+          ['pendientes', pendientes.toLocaleString('es-AR')],
+          ['cobertura', delPeriodo.length ? Math.round(enviadas / delPeriodo.length * 100) + '%' : '—'],
+          ['en esta lista', filtrados.length.toLocaleString('es-AR')],
+        ]} />
+      </div>
+    </div>
+
+    <div class="tabla-caja panel" ref=${caja}>
+      <table class="grilla">
+        <thead><tr>
+          <${Th} campo="n_serie" rot="Serie" orden=${orden} setOrden=${setOrden} clase="congelada" ancho=${110} />
+          <${Th} campo="modelo" rot="Modelo" orden=${orden} setOrden=${setOrden} />
+          <${Th} campo="cliente_nombre" rot="Cliente" orden=${orden} setOrden=${setOrden} ancho=${200} />
+          <${Th} campo="ciudad" rot="Ciudad y provincia" orden=${orden} setOrden=${setOrden} ancho=${170} />
+          <${Th} campo="fecha_instalacion" rot="Fecha de instalación" orden=${orden} setOrden=${setOrden} />
+          <th class="col-encuesta" style="min-width:150px">Encuesta enviada</th>
+        </tr></thead>
+        <tbody>
+          ${filtrados.slice(0, tope).map(eq => html`<tr key=${eq.id}
+              class=${eq.encuesta_instalacion_enviada ? 'enc-si' : ''}>
+            <td class="congelada"><b>${eq.n_serie || '#' + eq.id}</b></td>
+            <td>${eq.modelo || ''}</td>
+            <td title=${eq.cliente_nombre}>${eq.cliente_nombre || ''}</td>
+            <td title=${[eq.ciudad, eq.provincia].filter(Boolean).join(', ')}>${[eq.ciudad, eq.provincia].filter(Boolean).join(', ')}</td>
+            <td>${fecha(eq.fecha_instalacion)}</td>
+            <td class="col-encuesta">
+              <label class="fila" style="gap:7px;cursor:${editable ? 'pointer' : 'default'};flex-wrap:nowrap">
+                <input type="checkbox" style="width:auto;transform:scale(1.25)"
+                  disabled=${!editable} checked=${!!eq.encuesta_instalacion_enviada}
+                  onChange=${e => marcar(eq, e.target.checked)} />
+                <span class="mini">${eq.encuesta_instalacion_enviada
+                  ? (eq.fecha_encuesta_instalacion ? fecha(eq.fecha_encuesta_instalacion, 1) : 'enviada')
+                  : 'sin enviar'}</span>
+              </label>
+            </td>
+          </tr>`)}
+        </tbody>
+      </table>
+      ${!filtrados.length && html`<div class="vacio">
+        ${estadoEnc === 'pendientes'
+          ? 'No queda ninguna encuesta de instalación pendiente con este filtro. 👌'
+          : 'No hay equipos instalados que coincidan.'}</div>`}
+      ${filtrados.length > tope && html`<div style="padding:10px;text-align:center">
+        <button class="btn sec" onClick=${() => setTope(tope + 500)}>
+          Mostrar más (${(filtrados.length - tope).toLocaleString('es-AR')} restantes)</button></div>`}
+      <${Deslizador} para=${caja} />
+    </div>
   </div>`;
 }
 
