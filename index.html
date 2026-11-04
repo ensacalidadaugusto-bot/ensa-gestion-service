@@ -3347,14 +3347,26 @@ async function leerRegistroInstalaciones(bytes) {
     -- incluido "numero", que se trae exactamente igual al "Id" de
     Microsoft Forms (a pedido de Augusto, sin corregir nada, sql/56).
 
-    Columnas del Excel que NO se traen a la base (quedan sólo en el
-    archivo original, decisión de Augusto del 04/11/2026): Motorización,
-    Detalle cabezal, Service vendido, Detalles de solicitud, Detalle
-    service Proactivo, Duración de la comunicación. Tampoco "Correo
-    electrónico" (siempre "anonymous": es la cuenta de Microsoft 365 con
-    la que se completa el formulario, no la del cliente -- el correo del
-    cliente es "Correo electrónico1") ni "Nombre" (siempre vacío en todo
-    el historial). */
+    A partir del 04/11/2026 (pedido de Augusto: "importame todas las
+    columnas y yo elijo cuales quedan, puedo ir filtrando") se traen
+    TODAS las preguntas del formulario que son datos del llamado --
+    incluidas las últimas cuatro que quedaban afuera (Detalle cabezal,
+    Service vendido, Detalles de solicitud, Detalle service Proactivo;
+    sql/58). Augusto elige después, campo por campo, cuáles quiere ver
+    en la ficha con el selector de campos visibles -- eso es una
+    preferencia de pantalla, no cambia qué se guarda en la base.
+
+    Columnas que NO se traen a la base, porque no son datos del llamado
+    sino metadatos de Microsoft Forms sobre quién/cuándo lo completó
+    (decisión explícita de Augusto, 04/11/2026): "Correo electrónico"
+    (siempre "anonymous": es la cuenta de Microsoft 365 con la que se
+    completa el formulario, no la del cliente -- el correo del cliente
+    es "Correo electrónico1"), "Nombre" (siempre vacío en todo el
+    historial), "Hora de inicio" y "Hora de finalización".
+
+    "Respuesta" (quién atendió el llamado, p. ej. "Mateo") SÍ se trae, a
+    columna aparte de "Registrado por:" -- son dos preguntas distintas del
+    mismo formulario, no un duplicado: "Respuesta" va a `atendido_por`. */
 async function leerLlamadosSoporte(bytes) {
   const entradas = leerCentralZip(bytes);
   const workbookXml = await extraerZip(bytes, entradas, 'xl/workbook.xml');
@@ -3418,6 +3430,13 @@ async function leerLlamadosSoporte(bytes) {
     detalle_solucion: buscar('detalle de la solucion brindada y acciones realizadas por el cliente'),
     estado_llamado: buscar('estado del reclamo'),
     registrado_por: buscar('registrado por:', 'registrado por'),
+    atendido_por: buscar('respuesta'),
+    motorizacion: buscar('motorizacion'),
+    duracion_comunicacion: buscar('duracion de la comunicacion'),
+    detalle_cabezal: buscar('detalle cabezal'),
+    service_vendido: buscar('service vendido'),
+    detalles_solicitud: buscar('detalles de solicitud'),
+    detalle_service_proactivo: buscar('detalle service proactivo'),
   };
   if (col.id < 0 || col.fecha_llamada < 0) {
     throw new Error('No se reconocen las columnas "Id" y "Fecha de llamada" en la primera fila del '
@@ -3479,7 +3498,11 @@ async function leerLlamadosSoporte(bytes) {
       detalles_llamado: val('detalles_llamado'), sugerencia_accion: val('sugerencia_accion'),
       accion_correctiva: val('accion_correctiva'), area_informada: val('area_informada'),
       detalle_aviso: val('detalle_aviso'), fecha_coordinada, detalle_solucion: val('detalle_solucion'),
-      estado_llamado,
+      estado_llamado, atendido_por: val('atendido_por'),
+      motorizacion: val('motorizacion'), duracion_comunicacion: val('duracion_comunicacion'),
+      detalle_cabezal: val('detalle_cabezal'), service_vendido: val('service_vendido'),
+      detalles_solicitud: val('detalles_solicitud'),
+      detalle_service_proactivo: val('detalle_service_proactivo'),
     });
   }
   return out;
@@ -11648,12 +11671,74 @@ const normCodigo = c => sinAcentos(codigoValido(c) || '').toUpperCase();
     guarda aparte, sólo desde alCerrarGenerar() más abajo, nunca escrito a
     mano desde la ficha. */
 const CAMPOS_LLAMADO = [
-  'fecha_llamada', 'registrado_por',
+  'fecha_llamada', 'registrado_por', 'atendido_por',
   'nombre_cliente', 'telefono', 'correo', 'direccion', 'localidad', 'provincia',
-  'cliente_id', 'equipo_id', 'n_serie', 'modelo_equipo', 'cantidad_paradas',
+  'cliente_id', 'equipo_id', 'n_serie', 'modelo_equipo', 'motorizacion', 'cantidad_paradas',
   'tipo_llamado', 'localizacion_problema', 'detalles_llamado', 'sugerencia_accion', 'accion_correctiva',
   'area_informada', 'detalle_aviso', 'fecha_coordinada', 'detalle_solucion', 'estado_llamado',
+  'duracion_comunicacion', 'detalle_cabezal', 'service_vendido', 'detalles_solicitud',
+  'detalle_service_proactivo',
 ];
+
+/** Rótulo legible de cada campo de CAMPOS_LLAMADO, para el selector de
+    campos visibles de la ficha (ver CamposVisiblesLlamado más abajo).
+    No incluye cliente_id/equipo_id (van siempre, no son "campos" sueltos
+    sino el enlace con Clientes y Equipos). */
+const ETIQUETA_CAMPO_LLAMADO = {
+  fecha_llamada: 'Fecha de llamada', registrado_por: 'Registrado por', atendido_por: 'Atendido por',
+  nombre_cliente: 'Cliente (nombre suelto)', telefono: 'Teléfono', correo: 'Correo electrónico',
+  direccion: 'Dirección', localidad: 'Localidad', n_serie: 'N° de serie', modelo_equipo: 'Modelo',
+  motorizacion: 'Motorización', cantidad_paradas: 'Cantidad de paradas', tipo_llamado: 'Tipo de llamado',
+  localizacion_problema: 'Localización del problema', detalles_llamado: 'Detalles del llamado',
+  sugerencia_accion: 'Sugerencia de acción', accion_correctiva: 'Acción correctiva',
+  area_informada: 'Área a la cual se informó', detalle_aviso: 'Detalle del aviso',
+  fecha_coordinada: 'Fecha coordinada con el cliente', detalle_solucion: 'Detalle de la solución',
+  estado_llamado: 'Estado del reclamo', duracion_comunicacion: 'Duración de la comunicación',
+  detalle_cabezal: 'Detalle cabezal', service_vendido: 'Service vendido',
+  detalles_solicitud: 'Detalles de solicitud', detalle_service_proactivo: 'Detalle service Proactivo',
+};
+
+/** Qué campos de la ficha del llamado están tildados para mostrarse.
+    Preferencia de pantalla de Augusto (04/11/2026: "importame todas las
+    columnas y yo elijo cuales quedan, puedo ir filtrando") -- vive sólo
+    en este navegador (localStorage), no en la base: no cambia qué se
+    guarda, sólo qué se ve. Por default, todo visible (ninguno oculto). */
+const CLAVE_CAMPOS_OCULTOS_LLAMADO = 'ensa_campos_ocultos_llamado';
+function camposOcultosLlamado() {
+  try {
+    const guardado = JSON.parse(localStorage.getItem(CLAVE_CAMPOS_OCULTOS_LLAMADO) || '[]');
+    return Array.isArray(guardado) ? guardado : [];
+  } catch (e) { return []; }
+}
+function guardarCamposOcultosLlamado(lista) {
+  try { localStorage.setItem(CLAVE_CAMPOS_OCULTOS_LLAMADO, JSON.stringify(lista)); } catch (e) { /* sin localStorage, no se persiste */ }
+}
+
+/** Panel para tildar/destildar qué campos de la ficha del llamado se
+    quieren ver. "ocultos" y "alCambiar" vienen de FichaLlamado (estado
+    en memoria, ya leído de localStorage al abrir la pantalla). */
+function CamposVisiblesLlamado({ ocultos, alCambiar, alCerrar }) {
+  const alternar = campo => {
+    const nuevos = ocultos.includes(campo) ? ocultos.filter(c => c !== campo) : [...ocultos, campo];
+    alCambiar(nuevos);
+  };
+  return html`<${Modal} titulo="Campos a mostrar en la ficha" alCerrar=${alCerrar} ancho=${520}>
+    <div class="mini" style="margin-bottom:10px">
+      Destildá los campos que no te interesa ver. Es una preferencia tuya, de este navegador:
+      no borra ni deja de guardar ningún dato, sólo lo oculta de la pantalla.
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px">
+      ${CAMPOS_LLAMADO.filter(c => ETIQUETA_CAMPO_LLAMADO[c]).map(c => html`
+        <label style="display:flex;align-items:center;gap:6px;font-size:14px">
+          <input type="checkbox" checked=${!ocultos.includes(c)} onChange=${() => alternar(c)} />
+          ${ETIQUETA_CAMPO_LLAMADO[c]}
+        </label>`)}
+    </div>
+    <div class="fila" style="justify-content:flex-end;margin-top:14px">
+      <button onClick=${() => alCambiar([])}>Mostrar todos</button>
+    </div>
+  <//>`;
+}
 
 const COLOR_ESTADO_LLAMADO = {
   'Resuelto telefónicamente': 'verde',
@@ -11755,7 +11840,7 @@ function SoporteTecnico() {
   return html`<div class="soporte">
     <div class="panel no-imprimir" style="margin-bottom:10px">
       <div class="panel-cab">
-        <h2>Soporte técnico</h2>
+        <h2>Línea de soporte</h2>
         <span class="mini">Llamados a la línea de soporte técnico 24 h.</span>
         <button class="btn sec chico" style="margin-left:auto" onClick=${recargar}>Recargar</button>
       </div>
@@ -11864,6 +11949,9 @@ function FichaLlamado({ original, alCerrar, alGuardar, alGenerarTrabajo, alVerTr
   const [guardando, setGuardando] = useState(false);
   const [msg, setMsg] = useState(null);
   const [confirmarBorrar, setConfirmarBorrar] = useState(false);
+  const [ocultos, setOcultos] = useState(camposOcultosLlamado);
+  const [verCampos, setVerCampos] = useState(false);
+  const cambiarOcultos = lista => { setOcultos(lista); guardarCamposOcultosLlamado(lista); };
 
   const cli = s.clientes.find(c => c.id === b.cliente_id);
   const eq = s.equipos.find(e => e.id === b.equipo_id);
@@ -11904,7 +11992,7 @@ function FichaLlamado({ original, alCerrar, alGuardar, alGenerarTrabajo, alVerTr
     } catch (e) { setMsg(e.message || String(e)); setGuardando(false); }
   }
 
-  const T = (k, rot, tipo = 'text', extra = {}) => html`<${Txt} rot=${rot} tipo=${tipo} valor=${b[k]}
+  const T = (k, rot, tipo = 'text', extra = {}) => ocultos.includes(k) ? null : html`<${Txt} rot=${rot} tipo=${tipo} valor=${b[k]}
     disabled=${!editable} alCambiar=${v => cambiar(k, v)} ...${extra} />`;
 
   return html`<div class="fondo" onClick=${e => e.target.className === 'fondo' && alCerrar()}>
@@ -11912,7 +12000,9 @@ function FichaLlamado({ original, alCerrar, alGuardar, alGenerarTrabajo, alVerTr
       <div class="ficha-cab">
         <h2>${nuevo ? 'Nuevo llamado' : `${original.n_ll} · ${fecha(b.fecha_llamada, true) || ''}`}</h2>
         ${b.estado_llamado && html`<${Et} txt=${b.estado_llamado} mapa=${COLOR_ESTADO_LLAMADO} />`}
-        <button class="btn sec chico" style="margin-left:auto" onClick=${alCerrar}>Cerrar</button>
+        <button class="btn sec chico" style="margin-left:auto" title="Elegir qué campos se ven en esta ficha"
+          onClick=${() => setVerCampos(true)}>⚙ Campos</button>
+        <button class="btn sec chico" onClick=${alCerrar}>Cerrar</button>
       </div>
       <div class="ficha-cuerpo">
         ${!editable && html`<div class="aviso">Estás viendo este llamado en modo lectura.</div>`}
@@ -11920,9 +12010,12 @@ function FichaLlamado({ original, alCerrar, alGuardar, alGenerarTrabajo, alVerTr
         <h3 class="rot-bloque">Datos del llamado</h3>
         <div class="rejilla">
           ${T('fecha_llamada', 'Fecha del llamado', 'date')}
-          <${Sel} rot="Tipo de llamado" valor=${b.tipo_llamado} opts=${opciones('tipo_llamado')}
-            disabled=${!editable} alCambiar=${v => cambiar('tipo_llamado', v)} />
+          ${!ocultos.includes('tipo_llamado') && html`<${Sel} rot="Tipo de llamado" valor=${b.tipo_llamado} opts=${opciones('tipo_llamado')}
+            disabled=${!editable} alCambiar=${v => cambiar('tipo_llamado', v)} />`}
           ${T('registrado_por', 'Registrado por')}
+          ${T('atendido_por', 'Atendido por', 'text', {
+            titulo: 'Quién atendió el llamado ("Respuesta" en el Excel de Microsoft Forms) -- no es lo mismo que "Registrado por", que es otra pregunta del mismo formulario.' })}
+          ${T('duracion_comunicacion', 'Duración de la comunicación')}
         </div>
 
         <h3 class="rot-bloque">Quién llama</h3>
@@ -11945,6 +12038,7 @@ function FichaLlamado({ original, alCerrar, alGuardar, alGenerarTrabajo, alVerTr
           ${T('correo', 'Correo')}
           ${T('n_serie', 'N° de serie (si lo dio)')}
           ${T('modelo_equipo', 'Modelo del equipo')}
+          ${T('motorizacion', 'Motorización')}
           ${T('cantidad_paradas', 'Cantidad de paradas')}
         </div>
         <div class="rejilla">
@@ -11963,14 +12057,22 @@ function FichaLlamado({ original, alCerrar, alGuardar, alGenerarTrabajo, alVerTr
 
         <h3 class="rot-bloque">Seguimiento</h3>
         <div class="rejilla">
-          <${Sel} rot="Área informada" valor=${b.area_informada} opts=${opciones('area_informada')}
-            disabled=${!editable} alCambiar=${v => cambiar('area_informada', v)} />
+          ${!ocultos.includes('area_informada') && html`<${Sel} rot="Área informada" valor=${b.area_informada} opts=${opciones('area_informada')}
+            disabled=${!editable} alCambiar=${v => cambiar('area_informada', v)} />`}
           ${T('fecha_coordinada', 'Fecha coordinada', 'date')}
-          <${Sel} rot="Estado del llamado" valor=${b.estado_llamado} opts=${opciones('estado_llamado')}
-            disabled=${!editable} alCambiar=${v => cambiar('estado_llamado', v)} />
+          ${!ocultos.includes('estado_llamado') && html`<${Sel} rot="Estado del llamado" valor=${b.estado_llamado} opts=${opciones('estado_llamado')}
+            disabled=${!editable} alCambiar=${v => cambiar('estado_llamado', v)} />`}
         </div>
         ${T('detalle_aviso', 'Detalle de lo informado', 'text', { area: 2 })}
         ${T('detalle_solucion', 'Detalle de la solución', 'text', { area: 2 })}
+
+        <h3 class="rot-bloque">Otros datos del formulario</h3>
+        <div class="rejilla dos">
+          ${T('detalle_cabezal', 'Detalle cabezal', 'text', { area: 2 })}
+          ${T('service_vendido', 'Service vendido', 'text', { area: 2 })}
+          ${T('detalles_solicitud', 'Detalles de solicitud', 'text', { area: 2 })}
+          ${T('detalle_service_proactivo', 'Detalle service Proactivo', 'text', { area: 2 })}
+        </div>
 
         <h3 class="rot-bloque">Trazabilidad</h3>
         ${original && original.trabajo_id
@@ -12000,6 +12102,8 @@ function FichaLlamado({ original, alCerrar, alGuardar, alGenerarTrabajo, alVerTr
     ${confirmarBorrar && html`<${Confirmar} textoSi="Sí, borrar"
       texto=${`¿Borrar el llamado ${original.n_ll}? Queda anotado en el historial.`}
       alSi=${borrar} alNo=${() => setConfirmarBorrar(false)} />`}
+    ${verCampos && html`<${CamposVisiblesLlamado} ocultos=${ocultos} alCambiar=${cambiarOcultos}
+      alCerrar=${() => setVerCampos(false)} />`}
   </div>`;
 }
 
@@ -12019,16 +12123,15 @@ function FichaLlamado({ original, alCerrar, alGuardar, alGenerarTrabajo, alVerTr
     "numero" pero cambia el resto, son dos llamados reales distintos que
     nunca se confunden entre sí.
 
-    A propósito NO se intenta adivinar equipo_id/cliente_id por N° de
-    serie: el histórico es texto suelto, tecleado durante años por el
-    personal de guardia, y una coincidencia de N° de serie contra un
-    equipo ya dado de alta no garantiza que sea el mismo cliente que
-    llamó (pueden haber pasado de mano, o ser un error de tipeo). Queda
-    igual que vino del Excel -- nombre, teléfono, N° de serie, todo como
-    texto suelto -- tal como van a llegar también los llamados por
-    Power Automate en tiempo real, que tampoco tienen de dónde sacar ese
-    enlace. Si hace falta, se enlaza a mano después, abriendo el llamado. */
+    Si el llamado trae N° de serie y ese equipo ya está dado de alta, se
+    completa equipo_id (y cliente_id, si el equipo ya tiene cliente) --
+    igual que al elegir el equipo a mano en la ficha del llamado (a
+    pedido de Augusto, 04/11/2026: "el resto de los datos sacalos con el
+    número de serie y la base de datos"). Si no se encuentra, el llamado
+    se carga igual, con el texto suelto tal como vino del Excel (nombre,
+    teléfono, N° de serie). */
 function ImportarLlamados({ alCerrar, alImportar, datosExistentes }) {
+  const s = useS();
   const [archivo, setArchivo] = useState(null);
   const [leyendo, setLeyendo] = useState(false);
   const [error, setError] = useState(null);
@@ -12066,13 +12169,18 @@ function ImportarLlamados({ alCerrar, alImportar, datosExistentes }) {
     return { nuevas, repetidas };
   }, [filas, datosExistentes]);
 
+  const listas = useMemo(() => nuevas.map(f => {
+    const eq = f.n_serie && s.equipos.find(e => normCodigo(e.n_serie) === normCodigo(f.n_serie));
+    return { ...f, equipo_id: eq ? eq.id : null, cliente_id: (eq && eq.cliente_id) || null };
+  }), [nuevas, s.equipos]);
+
   async function confirmar() {
     setSubiendo(true);
     let creadas = 0;
     const erroresCarga = [];
     const filasCreadas = [];
-    for (let i = 0; i < nuevas.length; i += LOTE_IMPORTAR) {
-      const lote = nuevas.slice(i, i + LOTE_IMPORTAR);
+    for (let i = 0; i < listas.length; i += LOTE_IMPORTAR) {
+      const lote = listas.slice(i, i + LOTE_IMPORTAR);
       const { data, error: errLote } = await cliente().from('llamados_soporte').insert(lote).select('*');
       if (errLote) { erroresCarga.push(errLote.message); continue; }
       creadas += (data || []).length;
@@ -12105,16 +12213,17 @@ function ImportarLlamados({ alCerrar, alImportar, datosExistentes }) {
         ['filas en el archivo', filas.length],
         ['ya estaban cargadas', repetidas.length],
         ['nuevas para cargar', nuevas.length],
+        ['con equipo ya identificado', listas.filter(f => f.equipo_id).length],
       ]} />
 
-      ${nuevas.length > 0 && html`<div class="tabla-caja" style="max-height:220px;margin-top:10px">
+      ${listas.length > 0 && html`<div class="tabla-caja" style="max-height:220px;margin-top:10px">
         <table class="grilla">
           <thead><tr><th>N° LL</th><th>Fecha</th><th>Cliente</th><th>N° de serie</th></tr></thead>
           <tbody>
-            ${nuevas.slice(0, 300).map((f, idx) => html`<tr key=${idx}>
+            ${listas.slice(0, 300).map((f, idx) => html`<tr key=${idx}>
               <td><b>LL${f.numero}</b></td><td>${fecha(f.fecha_llamada)}</td>
               <td>${f.nombre_cliente || html`<span class="mini">sin identificar</span>`}</td>
-              <td>${f.n_serie || html`<span class="mini">—</span>`}</td>
+              <td>${f.n_serie || html`<span class="mini">—</span>`}${f.equipo_id ? ' ✓' : ''}</td>
             </tr>`)}
           </tbody>
         </table>
@@ -13869,7 +13978,7 @@ const VISTAS = [
   ['controles', 'Coordinación Entrega de equipos', () => html`<${Controles} />`, ['admin', 'lectura']],
   /* Línea de soporte técnico 24 h: los llamados que a veces generan un
      trabajo nuevo (sql/55). Mismos roles que ven y cargan Encuestas. */
-  ['soporte',   'Soporte técnico',     () => html`<${SoporteTecnico} />`, ['admin', 'oficina', 'carga']],
+  ['soporte',   'Línea de soporte',    () => html`<${SoporteTecnico} />`, ['admin', 'oficina', 'carga']],
   /* Clientes, equipos y el registro de instalaciones en una sola pantalla
      (antes eran dos módulos separados: "Clientes y equipos" e
      "Instalaciones"). La ve cualquier rol, incluido consulta (sql/37).
