@@ -259,6 +259,18 @@ table.grilla td{border-bottom:1px solid var(--borde-suave);border-right:1px soli
 table.grilla tbody tr:nth-child(even){background:var(--franja)}
 table.grilla tbody tr:hover,table.grilla tbody tr:nth-child(even):hover{background:var(--hover);cursor:pointer}
 table.grilla tbody tr.sel{background:var(--azul-claro)}
+/* "Línea de soporte": un llamado sin nadie identificado todavía en
+   "Atendido por" (columna "Respuesta" del Excel) queda en rojo, a pedido
+   de Augusto (04/11/2026): "permitir que cada llamado nuevo que ingresa
+   quede en rojo y, hasta que no se le completa la columna respuesta siga
+   así, de esa manera yo chequeo que mateo o quien sea lo vio y decidió
+   sobre ello". Apenas se completa ese campo (desde la ficha, desde el
+   Excel o desde Power Automate), la fila vuelve a su color normal solo,
+   sin que haga falta ningún otro paso. */
+table.grilla tbody tr.sin-atender,
+table.grilla tbody tr.sin-atender:nth-child(even){background:color-mix(in srgb, var(--error) 10%, var(--papel))}
+table.grilla tbody tr.sin-atender:hover{background:color-mix(in srgb, var(--error) 17%, var(--papel))}
+table.grilla tbody tr.sin-atender td:first-child{border-left:4px solid var(--error)}
 /* fila hija: el equipo colgando de su cliente */
 table.grilla tbody tr.hija,table.grilla tbody tr.hija:nth-child(even){background:var(--franja)}
 table.grilla tbody tr.hija:hover{background:var(--hover)}
@@ -11813,7 +11825,7 @@ async function traerLlamados() {
   return traerTodo('llamados_soporte', { campo: 'numero', asc: false });
 }
 
-const FILTRO_LLAMADOS = { texto: '', anio: '', tipo: '', estado: '', sinTrabajo: false };
+const FILTRO_LLAMADOS = { texto: '', anio: '', tipo: '', estado: '', sinTrabajo: false, sinAtender: false };
 
 /* ---------------------------------------------------------------------
    LA PANTALLA
@@ -11870,6 +11882,7 @@ function SoporteTecnico() {
       && (!f.tipo || x.tipo_llamado === f.tipo)
       && (!f.estado || x.estado_llamado === f.estado)
       && (!f.sinTrabajo || !x.trabajo_id)
+      && (!f.sinAtender || !x.atendido_por)
       && (!t || sinAcentos([x.n_ll, x.cliente_nombre, x.telefono, x.equipo_serie,
           x.detalles_llamado, x.localizacion_problema].join(' ')).includes(t))), orden);
   }, [filas, f, orden]);
@@ -11922,6 +11935,11 @@ function SoporteTecnico() {
           <input type="checkbox" style="width:auto" checked=${f.sinTrabajo}
             onChange=${e => setF({ ...f, sinTrabajo: e.target.checked })} /> Sólo sin trabajo generado
         </label>
+        <label class="fila mini" style="gap:4px;white-space:nowrap"
+          title='Llamados donde todavía no se completó "Atendido por" (la pregunta "Respuesta" del Excel): nadie marcó que lo vio y decidió qué hacer.'>
+          <input type="checkbox" style="width:auto" checked=${f.sinAtender}
+            onChange=${e => setF({ ...f, sinAtender: e.target.checked })} /> Sólo sin atender
+        </label>
         <button class="btn sec chico" onClick=${() => setF(FILTRO_LLAMADOS)}>Limpiar</button>
         <div style="margin-left:auto;display:flex;gap:8px">
           <button class="btn sec chico" title="Elegir qué columnas se ven en esta grilla"
@@ -11937,6 +11955,7 @@ function SoporteTecnico() {
           ['llamados', numAR(filtradas.length)],
           ['generaron trabajo', numAR(filtradas.filter(x => x.trabajo_id).length)],
           ['sin trabajo todavía', numAR(filtradas.filter(x => !x.trabajo_id).length)],
+          ['sin atender', numAR(filtradas.filter(x => !x.atendido_por).length)],
         ]} />
       </div>
     </div>
@@ -11957,7 +11976,9 @@ function SoporteTecnico() {
           ${colVisibles.map(c => html`<th key=${c}>${ETIQUETA_CAMPO_LLAMADO[c]}</th>`)}
         </tr></thead>
         <tbody>
-          ${filtradas.map(x => html`<tr key=${x.id} style="cursor:pointer" onClick=${() => setAbierto({ id: x.id })}>
+          ${filtradas.map(x => html`<tr key=${x.id} style="cursor:pointer" class=${x.atendido_por ? '' : 'sin-atender'}
+              onClick=${() => setAbierto({ id: x.id })}
+              title=${x.atendido_por ? '' : 'Sin atender: todavía no se completó quién atendió este llamado ("Atendido por" / "Respuesta" del Excel).'}>
             <td><b>${x.n_ll}</b></td>
             <td>${fecha(x.fecha_llamada)}</td>
             <td>${x.cliente_nombre || html`<span class="mini">sin identificar</span>`}${x.telefono ? ' · ' + x.telefono : ''}</td>
