@@ -1135,7 +1135,6 @@ table.grilla.tabla-inspectores tbody tr:hover{cursor:default}
 div.campo{display:block;margin-bottom:9px}
 div.campo>span{display:block;font-size:11px;color:var(--suave);margin-bottom:3px;text-transform:uppercase;letter-spacing:.3px}
 
-
 </style>
 </head>
 <body>
@@ -3335,6 +3334,152 @@ async function leerRegistroInstalaciones(bytes) {
       vendedor: val('vendedor'), instaladores: val('instaladores'), ubicacion: val('ubicacion'),
       obs_instalaciones: val('obs_instalaciones'), obs_comercial: val('obs_comercial'),
       obs_produccion: val('obs_produccion'),
+    });
+  }
+  return out;
+}
+
+/** Lee el historial de la línea de soporte técnico desde el .xlsx que
+    exporta Microsoft Forms (36 columnas, siempre con esos mismos
+    nombres de pregunta en la primera fila -- no hay que tocar nada en
+    Forms para que esto siga funcionando). Devuelve un arreglo de
+    objetos, uno por llamado, listos para insertar en llamados_soporte
+    -- incluido "numero", que se trae exactamente igual al "Id" de
+    Microsoft Forms (a pedido de Augusto, sin corregir nada, sql/56).
+
+    Columnas del Excel que NO se traen a la base (quedan sólo en el
+    archivo original, decisión de Augusto del 04/11/2026): Motorización,
+    Detalle cabezal, Service vendido, Detalles de solicitud, Detalle
+    service Proactivo, Duración de la comunicación. Tampoco "Correo
+    electrónico" (siempre "anonymous": es la cuenta de Microsoft 365 con
+    la que se completa el formulario, no la del cliente -- el correo del
+    cliente es "Correo electrónico1") ni "Nombre" (siempre vacío en todo
+    el historial). */
+async function leerLlamadosSoporte(bytes) {
+  const entradas = leerCentralZip(bytes);
+  const workbookXml = await extraerZip(bytes, entradas, 'xl/workbook.xml');
+  if (!workbookXml) throw new Error('No es un archivo .xlsx válido (no tiene xl/workbook.xml).');
+
+  let hojaPath = 'xl/worksheets/sheet1.xml';
+  try {
+    const relsXml = await extraerZip(bytes, entradas, 'xl/_rels/workbook.xml.rels');
+    const mSheet = workbookXml.match(/<sheet\b[^>]*\/>/);
+    const ridM = mSheet && mSheet[0].match(/r:id="([^"]+)"/);
+    if (relsXml && ridM) {
+      const relM = relsXml.match(new RegExp('<Relationship[^>]*Id="' + ridM[1] + '"[^>]*Target="([^"]+)"'));
+      if (relM) hojaPath = 'xl/' + relM[1].replace(/^\.?\/?(xl\/)?/, '');
+    }
+  } catch (e) { /* si algo de esto falla, nos quedamos con sheet1.xml */ }
+
+  const sheetXml = (await extraerZip(bytes, entradas, hojaPath))
+    || (await extraerZip(bytes, entradas, 'xl/worksheets/sheet1.xml'));
+  if (!sheetXml) throw new Error('No se encontró ninguna hoja dentro del archivo.');
+
+  const sharedXml = await extraerZip(bytes, entradas, 'xl/sharedStrings.xml');
+  const compartidas = parseSharedStrings(sharedXml);
+  const filas = parseFilasHoja(sheetXml, compartidas);
+  if (!filas.length) return [];
+
+  /* Array.from (no .map): la fila de encabezados puede tener huecos de
+     verdad al final (columnas sin ninguna celda en el XML, como pasa en
+     la exportación de Microsoft Forms) -- con .map() esos huecos quedan
+     como posiciones vacías del arreglo, y findIndex() sí las recorre más
+     abajo, así que revienta al llamar h.replace() sobre un hueco. */
+  const cabeceraFila = filas[0] || [];
+  const encabezado = Array.from({ length: cabeceraFila.length },
+    (_, i) => sinAcentos(String(cabeceraFila[i] ?? '').trim().toLowerCase()));
+  const buscar = (...alternativas) => {
+    for (const alt of alternativas) {
+      const i = encabezado.findIndex(h => h.replace(/\s+/g, ' ').trim() === sinAcentos(alt));
+      if (i >= 0) return i;
+    }
+    return -1;
+  };
+  const col = {
+    id: buscar('id'),
+    fecha_llamada: buscar('fecha de llamada'),
+    nombre_cliente: buscar('cliente (apellido y nombre)'),
+    telefono: buscar('telefono'),
+    direccion: buscar('direccion de instalacion'),
+    correo: buscar('correo electronico1'),
+    localidad: buscar('localidad'),
+    pais: buscar('pais'),
+    n_serie: buscar('n° de serie', 'nº de serie', 'n de serie'),
+    modelo_equipo: buscar('modelo ascensor'),
+    cantidad_paradas: buscar('cantidad de paradas'),
+    tipo_llamado: buscar('tipo de llamado'),
+    localizacion_problema: buscar('localizacion del problema'),
+    detalles_llamado: buscar('detalles del llamado'),
+    sugerencia_accion: buscar('sugerencia de accion'),
+    accion_correctiva: buscar('accion correctiva'),
+    area_informada: buscar('area a la cual se informo'),
+    detalle_aviso: buscar('detalle del aviso'),
+    fecha_coordinada: buscar('fecha coordinada con el cliente'),
+    detalle_solucion: buscar('detalle de la solucion brindada y acciones realizadas por el cliente'),
+    estado_llamado: buscar('estado del reclamo'),
+    registrado_por: buscar('registrado por:', 'registrado por'),
+  };
+  if (col.id < 0 || col.fecha_llamada < 0) {
+    throw new Error('No se reconocen las columnas "Id" y "Fecha de llamada" en la primera fila del '
+      + 'archivo. ¿Es la exportación de Microsoft Forms de la línea de soporte técnico?');
+  }
+
+  /* "Localización del problema" viene, en las respuestas más nuevas, como
+     un casillero de selección múltiple -- Forms lo exporta como un texto
+     con forma de arreglo JSON (p. ej. ["Cabina","Cabezal","Puerta"]). En
+     las respuestas más viejas es, directamente, texto libre. Las dos
+     formas se guardan como una sola línea de texto separada por comas. */
+  function textoLocalizacion(v) {
+    const t = limpiarCelda(v);
+    if (!t) return null;
+    if (t.startsWith('[')) {
+      try {
+        const arr = JSON.parse(t);
+        if (Array.isArray(arr)) return arr.filter(Boolean).join(', ');
+      } catch (e) { /* no era JSON de verdad: se deja como texto libre */ }
+    }
+    return t;
+  }
+
+  const out = [];
+  for (let i = 1; i < filas.length; i++) {
+    const f = filas[i];
+    if (!f) continue;
+    const idVal = f[col.id];
+    if (idVal === null || idVal === undefined || idVal === '') continue;   // sin Id: no se trae (una sola fila en todo el historial)
+    const numero = Number(idVal);
+    if (!Number.isFinite(numero)) continue;
+
+    const fechaVal = f[col.fecha_llamada];
+    const fecha_llamada = typeof fechaVal === 'number' ? fechaDeSerie(fechaVal)
+      : (fechaVal ? String(fechaVal).trim().slice(0, 10) : null);
+    if (!fecha_llamada) continue;   // la base exige la fecha; sin ella no se puede cargar esta fila
+    const val = k => (col[k] >= 0 ? limpiarCelda(f[col[k]]) : null);
+
+    const localidadBase = val('localidad');
+    const pais = val('pais');
+    const localidad = localidadBase && pais ? `${localidadBase} (${pais})`
+      : (localidadBase || (pais ? `(${pais})` : null));
+
+    const fechaCoordVal = col.fecha_coordinada >= 0 ? f[col.fecha_coordinada] : null;
+    const fecha_coordinada = typeof fechaCoordVal === 'number' ? fechaDeSerie(fechaCoordVal)
+      : (fechaCoordVal ? String(fechaCoordVal).trim().slice(0, 10) : null);
+
+    const estadoCrudo = val('estado_llamado');
+    const estado_llamado = estadoCrudo ? estadoCrudo.replace(/\s*\.+\s*$/, '').trim() || null : null;
+
+    out.push({
+      numero, fecha_llamada,
+      registrado_por: val('registrado_por'),
+      nombre_cliente: val('nombre_cliente'), telefono: val('telefono'), correo: val('correo'),
+      direccion: val('direccion'), localidad, provincia: null,
+      n_serie: val('n_serie'), modelo_equipo: val('modelo_equipo'), cantidad_paradas: val('cantidad_paradas'),
+      tipo_llamado: val('tipo_llamado'),
+      localizacion_problema: textoLocalizacion(col.localizacion_problema >= 0 ? f[col.localizacion_problema] : null),
+      detalles_llamado: val('detalles_llamado'), sugerencia_accion: val('sugerencia_accion'),
+      accion_correctiva: val('accion_correctiva'), area_informada: val('area_informada'),
+      detalle_aviso: val('detalle_aviso'), fecha_coordinada, detalle_solucion: val('detalle_solucion'),
+      estado_llamado,
     });
   }
   return out;
@@ -11535,6 +11680,7 @@ function SoporteTecnico() {
   const [abierto, setAbierto] = useState(null);           // {id} | {nuevo:true}
   const [generandoDesde, setGenerandoDesde] = useState(null);   // la fila del llamado que está generando su trabajo
   const [verTrabajoId, setVerTrabajoId] = useState(null);
+  const [importando, setImportando] = useState(false);
   const caja = useRef(null);
 
   const recargar = useCallback(async () => {
@@ -11626,7 +11772,9 @@ function SoporteTecnico() {
             onChange=${e => setF({ ...f, sinTrabajo: e.target.checked })} /> Sólo sin trabajo generado
         </label>
         <button class="btn sec chico" onClick=${() => setF(FILTRO_LLAMADOS)}>Limpiar</button>
-        <div style="margin-left:auto">
+        <div style="margin-left:auto;display:flex;gap:8px">
+          ${puedeSoporte() && html`<button class="btn sec chico" onClick=${() => setImportando(true)}>
+            Cargar Excel</button>`}
           ${puedeSoporte() && html`<button class="btn chico" onClick=${() => setAbierto({ nuevo: true })}>
             + Nuevo llamado</button>`}
         </div>
@@ -11679,6 +11827,8 @@ function SoporteTecnico() {
       alVerTrabajo=${id => { setAbierto(null); setVerTrabajoId(id); }} />`}
     ${generandoDesde && html`<${Ficha} nuevo precarga=${precargaDesdeLlamado(generandoDesde)} alCerrar=${alCerrarGenerar} />`}
     ${verTrabajoId && html`<${Ficha} id=${verTrabajoId} alCerrar=${() => setVerTrabajoId(null)} />`}
+    ${importando && html`<${ImportarLlamados} alCerrar=${() => setImportando(false)} datosExistentes=${datos}
+      alImportar=${nuevas => setDatos(d => [...(d || []), ...nuevas].sort((a, b) => b.numero - a.numero))} />`}
   </div>`;
 }
 
@@ -11851,6 +12001,136 @@ function FichaLlamado({ original, alCerrar, alGuardar, alGenerarTrabajo, alVerTr
       texto=${`¿Borrar el llamado ${original.n_ll}? Queda anotado en el historial.`}
       alSi=${borrar} alNo=${() => setConfirmarBorrar(false)} />`}
   </div>`;
+}
+
+/** Importa el historial de la línea de soporte técnico desde el .xlsx que
+    exporta Microsoft Forms -- lo lee leerLlamadosSoporte() (app/15_xlsx.js).
+    Mismo patrón que ImportarInstalaciones (app/80_maestros.js): se lee en
+    el navegador, sin mandar nada a ningún lado hasta confirmar, y antes de
+    cargar avisa cuánto de eso ya está en la base.
+
+    "numero" se trae tal cual el "Id" de Microsoft Forms, sin tocarlo
+    (sql/56: ya no hace falta que sea distinto entre filas, porque ese
+    contador se reinició en algún momento de 2026). Por eso "numero" solo
+    NO alcanza como clave para saber qué ya está cargado -- la clave que se
+    usa acá es numero + fecha del llamado + teléfono + nombre normalizados:
+    si coinciden los cuatro, es, a los fines prácticos, la misma fila ya
+    traída (de este archivo o de una carga anterior), y si sólo coincide el
+    "numero" pero cambia el resto, son dos llamados reales distintos que
+    nunca se confunden entre sí.
+
+    A propósito NO se intenta adivinar equipo_id/cliente_id por N° de
+    serie: el histórico es texto suelto, tecleado durante años por el
+    personal de guardia, y una coincidencia de N° de serie contra un
+    equipo ya dado de alta no garantiza que sea el mismo cliente que
+    llamó (pueden haber pasado de mano, o ser un error de tipeo). Queda
+    igual que vino del Excel -- nombre, teléfono, N° de serie, todo como
+    texto suelto -- tal como van a llegar también los llamados por
+    Power Automate en tiempo real, que tampoco tienen de dónde sacar ese
+    enlace. Si hace falta, se enlaza a mano después, abriendo el llamado. */
+function ImportarLlamados({ alCerrar, alImportar, datosExistentes }) {
+  const [archivo, setArchivo] = useState(null);
+  const [leyendo, setLeyendo] = useState(false);
+  const [error, setError] = useState(null);
+  const [filas, setFilas] = useState(null);
+  const [subiendo, setSubiendo] = useState(false);
+  const [resultado, setResultado] = useState(null);
+
+  async function elegirArchivo(e) {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    setArchivo(f); setFilas(null); setError(null); setResultado(null); setLeyendo(true);
+    try {
+      const buf = new Uint8Array(await f.arrayBuffer());
+      setFilas(await leerLlamadosSoporte(buf));
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setLeyendo(false);
+    }
+  }
+
+  const clave = f => [f.numero, f.fecha_llamada, String(f.telefono || '').replace(/\D/g, ''),
+    sinAcentos(f.nombre_cliente || '').toUpperCase().trim()].join('|');
+
+  const { nuevas, repetidas } = useMemo(() => {
+    if (!filas) return { nuevas: [], repetidas: [] };
+    const existentes = new Set((datosExistentes || []).map(clave));
+    const nuevas = [], repetidas = [];
+    for (const f of filas) {
+      const k = clave(f);
+      if (existentes.has(k)) { repetidas.push(f); continue; }
+      existentes.add(k);   // también pisa duplicados repetidos dentro del propio archivo
+      nuevas.push(f);
+    }
+    return { nuevas, repetidas };
+  }, [filas, datosExistentes]);
+
+  async function confirmar() {
+    setSubiendo(true);
+    let creadas = 0;
+    const erroresCarga = [];
+    const filasCreadas = [];
+    for (let i = 0; i < nuevas.length; i += LOTE_IMPORTAR) {
+      const lote = nuevas.slice(i, i + LOTE_IMPORTAR);
+      const { data, error: errLote } = await cliente().from('llamados_soporte').insert(lote).select('*');
+      if (errLote) { erroresCarga.push(errLote.message); continue; }
+      creadas += (data || []).length;
+      filasCreadas.push(...(data || []));
+    }
+    setSubiendo(false);
+    setResultado({ creadas, errores: erroresCarga });
+    if (filasCreadas.length) alImportar(filasCreadas);
+    if (erroresCarga.length) toast(`Se cargaron ${creadas}, pero hubo errores: ${erroresCarga[0]}`, 'error');
+    else toast(`${creadas} llamados cargados desde el Excel.`, 'ok');
+  }
+
+  return html`<${Modal} titulo="Cargar Excel de la línea de soporte técnico" alCerrar=${alCerrar} ancho=${680}>
+    <p class="mini">Elegí el Excel que exporta Microsoft Forms (el histórico de la línea de soporte, o una
+      exportación más nueva). Se lee acá mismo, en tu navegador: no se manda a ningún lado hasta que
+      confirmes la carga. El N° LL de cada llamado se trae tal como figura en el Excel ("Id" de Forms),
+      sin corregir nada.</p>
+
+    <div class="rejilla">
+      <${Campo} rot="Archivo (.xlsx)">
+        <input type="file" accept=".xlsx" disabled=${leyendo || subiendo} onChange=${elegirArchivo} />
+      <//>
+    </div>
+
+    ${leyendo && html`<p class="mini">Leyendo el archivo…</p>`}
+    ${error && html`<p class="mini" style="color:var(--error)">No se pudo leer: ${error}</p>`}
+
+    ${filas && !error && html`<div>
+      <${Resumen} items=${[
+        ['filas en el archivo', filas.length],
+        ['ya estaban cargadas', repetidas.length],
+        ['nuevas para cargar', nuevas.length],
+      ]} />
+
+      ${nuevas.length > 0 && html`<div class="tabla-caja" style="max-height:220px;margin-top:10px">
+        <table class="grilla">
+          <thead><tr><th>N° LL</th><th>Fecha</th><th>Cliente</th><th>N° de serie</th></tr></thead>
+          <tbody>
+            ${nuevas.slice(0, 300).map((f, idx) => html`<tr key=${idx}>
+              <td><b>LL${f.numero}</b></td><td>${fecha(f.fecha_llamada)}</td>
+              <td>${f.nombre_cliente || html`<span class="mini">sin identificar</span>`}</td>
+              <td>${f.n_serie || html`<span class="mini">—</span>`}</td>
+            </tr>`)}
+          </tbody>
+        </table>
+      </div>`}
+    </div>`}
+
+    ${resultado && html`<p class="mini" style="margin-top:10px">
+      ${resultado.creadas} llamados cargados.
+      ${resultado.errores.length ? html` Hubo errores: ${resultado.errores.join(' · ')}` : ''}</p>`}
+
+    <div class="fila" style="justify-content:flex-end;margin-top:14px">
+      <button class="btn sec" onClick=${alCerrar} disabled=${subiendo}>Cerrar</button>
+      ${filas && !resultado && html`<button class="btn" disabled=${!nuevas.length || subiendo}
+        onClick=${confirmar}>${subiendo ? 'Cargando…' : `Cargar ${nuevas.length} llamados nuevos`}</button>`}
+    </div>
+  <//>`;
 }
 /* ===== 80_maestros.js ===== */
 /* =====================================================================
@@ -13865,7 +14145,6 @@ async function iniciar() {
 }
 
 iniciar();
-
 
 </script>
 </body>
