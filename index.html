@@ -7707,10 +7707,29 @@ function EncuestasInstalaciones() {
   const editable = puedeEncuestas();
 
   /* A pedido de Augusto (04/11/2026): "de las instalaciones que me
-     cargue en un botón las observaciones de cada una" -- equipos.
-     observaciones, en un modal por fila (igual que el comentario técnico
-     de Postventa, más abajo). */
+     cargue en un botón las observaciones de cada una" -- y, al ver que no
+     salía nada: "Tiene qu juntarme las tres observaciones que aparecen
+     asociasdas a cada equipo en la base de datos (area instalaciones,
+     area comercial y area produiccion)". No es equipos.observaciones (un
+     campo aparte, de Maestros, que en la práctica no se usa): son las
+     tres columnas del REGISTRO DE INSTALACIONES (tabla "instalaciones":
+     obs_instalaciones / obs_comercial / obs_produccion, ver
+     leerRegistroInstalaciones() más arriba), cruzado por código/n° de
+     serie con el mismo criterio que ya usa Maestros (instalacionPorCodigo,
+     app/80_maestros.js): si el código se repite (reinstalación), se toma
+     la fila más nueva. Se muestran las tres juntas, en un modal por fila. */
   const [verObs, setVerObs] = useState(null);   // { titulo, texto } | null
+
+  const instalacionPorCodigo = useMemo(() => {
+    const m = new Map();
+    s.instalaciones.forEach(i => {
+      const cod = normCodigo(i.codigo);
+      if (!cod) return;
+      const actual = m.get(cod);
+      if (!actual || (i.fecha_instalacion || '') >= (actual.fecha_instalacion || '')) m.set(cod, i);
+    });
+    return m;
+  }, [s.instalaciones]);
 
   /* Sólo equipos ya instalados: antes de eso no hay a quién encuestar */
   const instalados = useMemo(() => s.equipos
@@ -7720,8 +7739,9 @@ function EncuestasInstalaciones() {
       return { ...eq,
         cliente_nombre: (cli && cli.nombre) || '',
         ciudad: eq.ciudad || (cli && cli.ciudad) || '',
-        provincia: eq.provincia || (cli && cli.provincia) || '' };
-    }), [s.equipos, s.clientes]);
+        provincia: eq.provincia || (cli && cli.provincia) || '',
+        inst: instalacionPorCodigo.get(normCodigo(eq.n_serie)) || null };
+    }), [s.equipos, s.clientes, instalacionPorCodigo]);
 
   const anios = useMemo(() => [...new Set(instalados
     .map(eq => String(eq.fecha_instalacion || '').slice(0, 4)).filter(Boolean))]
@@ -7772,13 +7792,28 @@ function EncuestasInstalaciones() {
     toast(`${ok} de ${faltan.length} marcadas como enviadas`, ok ? 'ok' : 'error');
   }
 
+  /** Las tres observaciones del registro de instalaciones, juntas en un
+      solo texto para el modal (cada área se nombra aunque esté vacía,
+      para que no parezca que el botón no trae nada). */
+  function textoObsInstalacion(eq) {
+    if (!eq.inst) return 'Este equipo no tiene ninguna fila en el registro de instalaciones (no se encontró su número de serie en esa planilla).';
+    const AREAS = [
+      ['Área instalaciones', eq.inst.obs_instalaciones],
+      ['Área comercial', eq.inst.obs_comercial],
+      ['Área producción', eq.inst.obs_produccion],
+    ];
+    return AREAS.map(([rot, v]) => `${rot}: ${(v && String(v).trim()) || '(sin cargar)'}`).join('\n\n');
+  }
+
   const COLS = [
     { rot: 'Serie', val: eq => eq.n_serie },
     { rot: 'Modelo', val: eq => eq.modelo },
     { rot: 'Cliente', val: eq => eq.cliente_nombre },
     { rot: 'Ciudad y provincia', val: eq => [eq.ciudad, eq.provincia].filter(x => x && String(x).trim()).join(', ') },
     { rot: 'Fecha de instalación', val: eq => fecha(eq.fecha_instalacion, 1) },
-    { rot: 'Observaciones', val: eq => eq.observaciones },
+    { rot: 'Obs. área instalaciones', val: eq => eq.inst && eq.inst.obs_instalaciones },
+    { rot: 'Obs. área comercial', val: eq => eq.inst && eq.inst.obs_comercial },
+    { rot: 'Obs. área producción', val: eq => eq.inst && eq.inst.obs_produccion },
     { rot: 'Encuesta enviada', val: eq => eq.encuesta_instalacion_enviada ? 'SI' : 'NO' },
     { rot: 'Fecha de envío', val: eq => fecha(eq.fecha_encuesta_instalacion, 1) },
   ];
@@ -7872,7 +7907,7 @@ function EncuestasInstalaciones() {
             <td>${fecha(eq.fecha_instalacion)}</td>
             <td>
               <button class="btn sec chico" onClick=${() => setVerObs(
-                { titulo: 'Observaciones — ' + (eq.n_serie || '#' + eq.id), texto: eq.observaciones })}>
+                { titulo: 'Observaciones — ' + (eq.n_serie || '#' + eq.id), texto: textoObsInstalacion(eq) })}>
                 Ver</button>
             </td>
             <td class="col-encuesta">
