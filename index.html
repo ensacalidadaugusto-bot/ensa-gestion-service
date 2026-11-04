@@ -7474,6 +7474,14 @@ function EncuestasPostventa() {
   const caja = useRef(null);
   const editable = puedeEncuestas();
 
+  /* A pedido de Augusto (04/11/2026): "en posventa que me cargue el
+     comentario técnico de los trabajos realizados" -- es el campo
+     "Comentarios internos" (t.comentarios) de la ficha, no "Observaciones
+     del servicio" (se confirmó cuál de los dos con una pregunta). Se ve
+     en un botón por fila, en un modal, para no alargar la tabla con
+     texto largo. */
+  const [verComentario, setVerComentario] = useState(null);   // { titulo, texto } | null
+
   /* Sólo trabajos realizados: la encuesta se manda después de la visita */
   const hechos = useMemo(() => s.trabajos.filter(t => t.estado === 'CUMPLIDO'), [s.trabajos]);
 
@@ -7542,6 +7550,7 @@ function EncuestasPostventa() {
     { rot: 'Estado', val: t => t.estado },
     { rot: 'Fecha del trabajo', val: t => fecha(t.fecha_visita, 1) },
     { rot: 'Técnico', val: t => t.tecnicos },
+    { rot: 'Comentario técnico', val: t => t.comentarios },
     { rot: 'Encuesta enviada', val: t => t.encuesta_enviada ? 'SI' : 'NO' },
     { rot: 'Fecha de envío', val: t => fecha(t.fecha_encuesta, 1) },
   ];
@@ -7630,6 +7639,7 @@ function EncuestasPostventa() {
           <${Th} campo="estado" rot="Estado" orden=${orden} setOrden=${setOrden} />
           <${Th} campo="fecha_visita" rot="Fecha" orden=${orden} setOrden=${setOrden} />
           <${Th} campo="tecnicos" rot="Técnico" orden=${orden} setOrden=${setOrden} ancho=${150} />
+          <th style="min-width:90px">Coment. técnico</th>
           <th class="col-encuesta" style="min-width:150px">Encuesta enviada</th>
         </tr></thead>
         <tbody>
@@ -7645,6 +7655,11 @@ function EncuestasPostventa() {
             <td><${Et} txt=${t.estado} mapa=${COLOR_ESTADO} /></td>
             <td>${fecha(t.fecha_visita)}</td>
             <td title=${t.tecnicos}>${t.tecnicos || ''}</td>
+            <td>
+              <button class="btn sec chico" onClick=${() => setVerComentario(
+                { titulo: 'Comentario técnico — ' + (t.n_llamada || '#' + t.id), texto: t.comentarios })}>
+                Ver</button>
+            </td>
             <td class="col-encuesta">
               <label class="fila" style="gap:7px;cursor:${editable ? 'pointer' : 'default'};flex-wrap:nowrap">
                 <input type="checkbox" style="width:auto;transform:scale(1.25)"
@@ -7669,6 +7684,10 @@ function EncuestasPostventa() {
     </div>
 
     ${fichaId && html`<${Ficha} id=${fichaId} alCerrar=${() => setFichaId(null)} />`}
+    ${verComentario && html`<${Modal} titulo=${verComentario.titulo} ancho=${520}
+        alCerrar=${() => setVerComentario(null)}>
+      <div style="white-space:pre-wrap">${verComentario.texto || '— sin comentarios cargados —'}</div>
+    <//>`}
   </div>`;
 }
 
@@ -7686,6 +7705,12 @@ function EncuestasInstalaciones() {
   const [tope, setTope] = useState(300);
   const caja = useRef(null);
   const editable = puedeEncuestas();
+
+  /* A pedido de Augusto (04/11/2026): "de las instalaciones que me
+     cargue en un botón las observaciones de cada una" -- equipos.
+     observaciones, en un modal por fila (igual que el comentario técnico
+     de Postventa, más abajo). */
+  const [verObs, setVerObs] = useState(null);   // { titulo, texto } | null
 
   /* Sólo equipos ya instalados: antes de eso no hay a quién encuestar */
   const instalados = useMemo(() => s.equipos
@@ -7753,6 +7778,7 @@ function EncuestasInstalaciones() {
     { rot: 'Cliente', val: eq => eq.cliente_nombre },
     { rot: 'Ciudad y provincia', val: eq => [eq.ciudad, eq.provincia].filter(x => x && String(x).trim()).join(', ') },
     { rot: 'Fecha de instalación', val: eq => fecha(eq.fecha_instalacion, 1) },
+    { rot: 'Observaciones', val: eq => eq.observaciones },
     { rot: 'Encuesta enviada', val: eq => eq.encuesta_instalacion_enviada ? 'SI' : 'NO' },
     { rot: 'Fecha de envío', val: eq => fecha(eq.fecha_encuesta_instalacion, 1) },
   ];
@@ -7833,6 +7859,7 @@ function EncuestasInstalaciones() {
           <${Th} campo="cliente_nombre" rot="Cliente" orden=${orden} setOrden=${setOrden} ancho=${200} />
           <${Th} campo="ciudad" rot="Ciudad y provincia" orden=${orden} setOrden=${setOrden} ancho=${170} />
           <${Th} campo="fecha_instalacion" rot="Fecha de instalación" orden=${orden} setOrden=${setOrden} />
+          <th style="min-width:90px">Observaciones</th>
           <th class="col-encuesta" style="min-width:150px">Encuesta enviada</th>
         </tr></thead>
         <tbody>
@@ -7843,6 +7870,11 @@ function EncuestasInstalaciones() {
             <td title=${eq.cliente_nombre}>${eq.cliente_nombre || ''}</td>
             <td title=${[eq.ciudad, eq.provincia].filter(Boolean).join(', ')}>${[eq.ciudad, eq.provincia].filter(Boolean).join(', ')}</td>
             <td>${fecha(eq.fecha_instalacion)}</td>
+            <td>
+              <button class="btn sec chico" onClick=${() => setVerObs(
+                { titulo: 'Observaciones — ' + (eq.n_serie || '#' + eq.id), texto: eq.observaciones })}>
+                Ver</button>
+            </td>
             <td class="col-encuesta">
               <label class="fila" style="gap:7px;cursor:${editable ? 'pointer' : 'default'};flex-wrap:nowrap">
                 <input type="checkbox" style="width:auto;transform:scale(1.25)"
@@ -7865,6 +7897,9 @@ function EncuestasInstalaciones() {
           Mostrar más (${(filtrados.length - tope).toLocaleString('es-AR')} restantes)</button></div>`}
       <${Deslizador} para=${caja} />
     </div>
+    ${verObs && html`<${Modal} titulo=${verObs.titulo} ancho=${520} alCerrar=${() => setVerObs(null)}>
+      <div style="white-space:pre-wrap">${verObs.texto || '— sin observaciones cargadas —'}</div>
+    <//>`}
   </div>`;
 }
 
