@@ -11689,7 +11689,7 @@ const ETIQUETA_CAMPO_LLAMADO = {
   nombre_cliente: 'Cliente (nombre suelto)', telefono: 'Teléfono', correo: 'Correo electrónico',
   direccion: 'Dirección', localidad: 'Localidad', n_serie: 'N° de serie', modelo_equipo: 'Modelo',
   motorizacion: 'Motorización', cantidad_paradas: 'Cantidad de paradas', tipo_llamado: 'Tipo de llamado',
-  localizacion_problema: 'Localización del problema', detalles_llamado: 'Detalles del llamado',
+  localizacion_problema: 'Localización del problema', detalles_llamado: 'Detalle del llamado',
   sugerencia_accion: 'Sugerencia de acción', accion_correctiva: 'Acción correctiva',
   area_informada: 'Área a la cual se informó', detalle_aviso: 'Detalle del aviso',
   fecha_coordinada: 'Fecha coordinada con el cliente', detalle_solucion: 'Detalle de la solución',
@@ -11740,6 +11740,68 @@ function CamposVisiblesLlamado({ ocultos, alCambiar, alCerrar }) {
   <//>`;
 }
 
+/** Columnas EXTRA de la grilla de "Línea de soporte" -- además de las ocho
+    fijas (N° LL, Fecha, Cliente/Teléfono, Equipo, Tipo, Estado, Trabajo,
+    Registrado por), que quedan como están porque son compuestas (mezclan
+    más de un campo o enlazan con Clientes/Equipos) o son el núcleo del
+    seguimiento del llamado. A pedido de Augusto (04/11/2026, después de
+    ver la cuarta entrega): "de igual manera que me permita mostrar todas
+    las columnas ahi y yo selecciono cuales quiero ver nomás" -- el resto
+    de CAMPOS_LLAMADO (todo lo que tiene rótulo en ETIQUETA_CAMPO_LLAMADO
+    y no es ya una columna fija) se puede sumar a la grilla, tildándolo en
+    el panel "⚙ Columnas". */
+const EXTRA_COLUMNAS_GRILLA_LLAMADO = CAMPOS_LLAMADO.filter(c => ETIQUETA_CAMPO_LLAMADO[c]
+  && !['fecha_llamada', 'registrado_por', 'nombre_cliente', 'telefono', 'n_serie',
+    'modelo_equipo', 'tipo_llamado', 'estado_llamado'].includes(c));
+
+/** Las columnas extra que Augusto pidió ver apenas se armó el panel --
+    las demás quedan disponibles pero no tildadas, hasta que las sume. */
+const COLUMNAS_GRILLA_LLAMADO_DEFAULT = ['localidad', 'localizacion_problema',
+  'detalles_llamado', 'sugerencia_accion', 'accion_correctiva', 'detalle_solucion',
+  'duracion_comunicacion'];
+
+const CLAVE_COLUMNAS_GRILLA_LLAMADO = 'ensa_columnas_grilla_llamado';
+function columnasGrillaLlamado() {
+  try {
+    const guardado = JSON.parse(localStorage.getItem(CLAVE_COLUMNAS_GRILLA_LLAMADO));
+    return Array.isArray(guardado) ? guardado : COLUMNAS_GRILLA_LLAMADO_DEFAULT;
+  } catch (e) { return COLUMNAS_GRILLA_LLAMADO_DEFAULT; }
+}
+function guardarColumnasGrillaLlamado(lista) {
+  try { localStorage.setItem(CLAVE_COLUMNAS_GRILLA_LLAMADO, JSON.stringify(lista)); } catch (e) { /* sin localStorage, no se persiste */ }
+}
+
+/** Panel para elegir qué columnas extra se suman a la grilla de llamados.
+    "visibles" y "alCambiar" vienen de SoporteTecnico (estado en memoria,
+    ya leído de localStorage al abrir la pantalla). Separado del panel de
+    la ficha (CamposVisiblesLlamado): acá el default es "ninguna" (salvo
+    las que pidió Augusto), no "todas", porque sumar una columna de más a
+    la grilla se nota más que en una ficha de un solo llamado. */
+function ColumnasGrillaLlamado({ visibles, alCambiar, alCerrar }) {
+  const alternar = campo => {
+    const nuevas = visibles.includes(campo) ? visibles.filter(c => c !== campo) : [...visibles, campo];
+    alCambiar(nuevas);
+  };
+  return html`<${Modal} titulo="Columnas a mostrar en la grilla" alCerrar=${alCerrar} ancho=${560}>
+    <div class="mini" style="margin-bottom:10px">
+      Tildá las columnas que querés sumar a la lista de llamados, además de las fijas
+      (N° LL, Fecha, Cliente/teléfono, Equipo, Tipo, Estado, Trabajo, Registrado por).
+      Es una preferencia tuya, de este navegador.
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px">
+      ${EXTRA_COLUMNAS_GRILLA_LLAMADO.map(c => html`
+        <label style="display:flex;align-items:center;gap:6px;font-size:14px">
+          <input type="checkbox" checked=${visibles.includes(c)} onChange=${() => alternar(c)} />
+          ${ETIQUETA_CAMPO_LLAMADO[c]}
+        </label>`)}
+    </div>
+    <div class="fila" style="justify-content:flex-end;margin-top:14px">
+      <button onClick=${() => alCambiar([])}>Ninguna</button>
+      <button onClick=${() => alCambiar(EXTRA_COLUMNAS_GRILLA_LLAMADO.slice())}>Todas</button>
+    </div>
+  <//>`;
+}
+
 const COLOR_ESTADO_LLAMADO = {
   'Resuelto telefónicamente': 'verde',
   'Resuelto telefónicamente, programar service': 'azul',
@@ -11766,6 +11828,10 @@ function SoporteTecnico() {
   const [generandoDesde, setGenerandoDesde] = useState(null);   // la fila del llamado que está generando su trabajo
   const [verTrabajoId, setVerTrabajoId] = useState(null);
   const [importando, setImportando] = useState(false);
+  const [colGrilla, setColGrilla] = useState(columnasGrillaLlamado);
+  const [verColumnas, setVerColumnas] = useState(false);
+  const cambiarColGrilla = lista => { setColGrilla(lista); guardarColumnasGrillaLlamado(lista); };
+  const colVisibles = EXTRA_COLUMNAS_GRILLA_LLAMADO.filter(c => colGrilla.includes(c));
   const caja = useRef(null);
 
   const recargar = useCallback(async () => {
@@ -11858,6 +11924,8 @@ function SoporteTecnico() {
         </label>
         <button class="btn sec chico" onClick=${() => setF(FILTRO_LLAMADOS)}>Limpiar</button>
         <div style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn sec chico" title="Elegir qué columnas se ven en esta grilla"
+            onClick=${() => setVerColumnas(true)}>⚙ Columnas</button>
           ${puedeSoporte() && html`<button class="btn sec chico" onClick=${() => setImportando(true)}>
             Cargar Excel</button>`}
           ${puedeSoporte() && html`<button class="btn chico" onClick=${() => setAbierto({ nuevo: true })}>
@@ -11886,6 +11954,7 @@ function SoporteTecnico() {
           <${Th} campo="estado_llamado" rot="Estado" orden=${orden} setOrden=${setOrden} />
           <th>Trabajo</th>
           <th>Registrado por</th>
+          ${colVisibles.map(c => html`<th key=${c}>${ETIQUETA_CAMPO_LLAMADO[c]}</th>`)}
         </tr></thead>
         <tbody>
           ${filtradas.map(x => html`<tr key=${x.id} style="cursor:pointer" onClick=${() => setAbierto({ id: x.id })}>
@@ -11899,8 +11968,11 @@ function SoporteTecnico() {
               ? html`<a href="#" onClick=${e => { e.preventDefault(); e.stopPropagation(); setVerTrabajoId(x.trabajo_id); }}>ver trabajo</a>`
               : html`<span class="mini">—</span>`}</td>
             <td class="mini">${x.registrado_por || '—'}</td>
+            ${colVisibles.map(c => { const v = c === 'fecha_coordinada' ? fecha(x[c]) : x[c];
+              return html`<td key=${c} class="mini" title=${x[c] || ''}
+                style="max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${v || '—'}</td>`; })}
           </tr>`)}
-          ${!filtradas.length && html`<tr><td colspan="8" class="vacio">No hay llamados con este filtro.</td></tr>`}
+          ${!filtradas.length && html`<tr><td colspan=${8 + colVisibles.length} class="vacio">No hay llamados con este filtro.</td></tr>`}
         </tbody>
       </table>
     </div>`}
@@ -11914,6 +11986,8 @@ function SoporteTecnico() {
     ${verTrabajoId && html`<${Ficha} id=${verTrabajoId} alCerrar=${() => setVerTrabajoId(null)} />`}
     ${importando && html`<${ImportarLlamados} alCerrar=${() => setImportando(false)} datosExistentes=${datos}
       alImportar=${nuevas => setDatos(d => [...(d || []), ...nuevas].sort((a, b) => b.numero - a.numero))} />`}
+    ${verColumnas && html`<${ColumnasGrillaLlamado} visibles=${colGrilla} alCambiar=${cambiarColGrilla}
+      alCerrar=${() => setVerColumnas(false)} />`}
   </div>`;
 }
 
