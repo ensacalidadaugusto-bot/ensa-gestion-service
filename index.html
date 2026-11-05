@@ -169,6 +169,13 @@ a{color:var(--acento)}
 .barra:not(.arriba).colapsada{width:0;padding:0;gap:0;box-shadow:none}
 .barra.arriba.colapsada{height:0;padding:0;gap:0;box-shadow:none}
 .barra .barra-cab{display:flex;align-items:center;gap:7px;flex:0 0 auto}
+/* Esconder y correr la barra, lejos del logo: a pedido de Augusto
+   (05/11/2026), estos dos botones se sacaron de al lado de la marca
+   (ahí arriba quedaba sólo el logo y el título, apretados contra los
+   íconos) y pasaron a vivir junto con el resto de los controles de la
+   barra (tema, usuario), del otro extremo -- abajo si la barra está a
+   la izquierda, al final de la fila si está arriba. */
+.barra-utilidades{display:flex;gap:7px;justify-content:center;flex:0 0 auto}
 .btn-colapsar,.btn-posicion{background:transparent;border:0;color:var(--barra-texto);cursor:pointer;
   font-size:17px;line-height:1;padding:5px 7px;border-radius:6px;flex:0 0 auto}
 .btn-colapsar:hover,.btn-posicion:hover{background:rgba(255,255,255,.12);color:#fff}
@@ -189,6 +196,18 @@ a{color:var(--acento)}
    (la pestaña de "Pedido / Cobranza / Historial" adentro de una ficha,
    por ejemplo), siguen siendo pastillas horizontales, sin cambios. */
 .barra:not(.arriba) .tab{display:block;width:100%;text-align:left}
+/* "Gestión": un desplegable adentro del menú que agrupa tres módulos que
+   antes eran entradas sueltas (Productividad, Tablero, Coordinación
+   Entrega de equipos), a pedido de Augusto (05/11/2026) -- ver
+   GRUPOS_MENU/armarMenu() en app.js. El título del grupo es un .tab más,
+   con una flechita (▸ cerrado, ▾ abierto) empujada al otro extremo; sus
+   módulos, cuando está abierto, son más .tab de siempre, uno después del
+   otro en la misma lista -- así se desplazan solos con el resto si no
+   entran todos, sin agregar ningún recuadro flotante propio. */
+.tab-grupo{display:flex;align-items:center;gap:8px}
+.barra:not(.arriba) .tab-grupo{width:100%;justify-content:space-between}
+.tab-grupo.on-hijo{background:rgba(255,255,255,.1);font-weight:600}
+.barra:not(.arriba) .tab-hijo{padding-left:30px;font-size:12.5px}
 .barra .der{margin-top:auto;display:flex;flex-direction:column;align-items:stretch;gap:8px;
   font-size:12px;flex:0 0 auto}
 .barra.arriba .der{margin-top:0;margin-left:auto;flex-direction:row;align-items:center}
@@ -14301,6 +14320,36 @@ function vistasDe(r) {
   return elegidas.length ? elegidas : permitidas;
 }
 
+/* "Gestión" agrupa en el menú, bajo un desplegable, tres pantallas que ya
+   existían sueltas -- a pedido de Augusto (05/11/2026): "Haceme un nuevo
+   modulo que se llame Gestión e incluya productividad, tablero y
+   coordinación de entrega de equipos. como que abra un desplegable". No
+   es una pantalla nueva: VISTAS no cambió (cada una sigue siendo la
+   misma vista de siempre, con los mismos permisos), así que nada de lo
+   que ya depende de esas claves por fuera del menú (vistasDe(),
+   ORDEN_POR_ROL, el atajo ?ir=...) tuvo que tocarse. Sólo cambia cómo se
+   arma la columna/fila de botones: armarMenu() agrupa las claves de
+   GRUPOS_MENU en una sola entrada, en el lugar que ocupaba la primera de
+   ellas, y dentro sólo quedan las que ese usuario puede ver -- si no
+   puede ver ninguna, el grupo entero no aparece. */
+const GRUPOS_MENU = [
+  { clave: 'gestion', rotulo: 'Gestión', hijos: ['productividad', 'tablero', 'controles'] },
+];
+function armarMenu(visibles) {
+  const yaPuestas = new Set();
+  const items = [];
+  for (const v of visibles) {
+    if (yaPuestas.has(v[0])) continue;
+    const grupo = GRUPOS_MENU.find(g => g.hijos.includes(v[0]));
+    if (!grupo) { items.push({ tipo: 'vista', clave: v[0], rotulo: v[1] }); continue; }
+    const hijos = grupo.hijos.map(k => visibles.find(x => x[0] === k)).filter(Boolean)
+      .map(x => ({ clave: x[0], rotulo: x[1] }));
+    hijos.forEach(h => yaPuestas.add(h.clave));
+    items.push({ tipo: 'grupo', clave: grupo.clave, rotulo: grupo.rotulo, hijos });
+  }
+  return items;
+}
+
 /* ---------------------------------------------------------------------
    CAMBIAR LA PROPIA CONTRASEÑA
    Cada uno entra por primera vez con una contraseña provisoria que le
@@ -14351,13 +14400,29 @@ function App() {
   const [cambiarClave, setCambiarClave] = useState(false);
   /* Columna de módulos: tabsRef se declara siempre, antes de los "return"
      de abajo, para no romper el orden de hooks entre la pantalla de login
-     y la aplicación ya adentro. */
+     y la aplicación ya adentro. Lo mismo vale para gruposAbiertos: qué
+     desplegables del menú (ver GRUPOS_MENU) están abiertos -- de ahí en
+     más es manual (tocar el título lo abre o lo cierra), salvo que la
+     vista activa quede adentro de uno cerrado (por ejemplo, al entrar
+     directo a "Tablero" con el atajo ?ir=tablero): ahí el efecto de más
+     abajo lo abre solo, para no dejar la pantalla puesta en un módulo que
+     el menú no deja ver dónde está. */
+  const [gruposAbiertos, setGruposAbiertos] = useState(() => new Set());
+  const alternarGrupoMenu = clave => setGruposAbiertos(ant => {
+    const n = new Set(ant);
+    n.has(clave) ? n.delete(clave) : n.add(clave);
+    return n;
+  });
   const tabsRef = useRef(null);
   // si se cambia de pestaña por otro medio (o al entrar), que la activa quede a la vista
   useEffect(() => {
     const c = tabsRef.current;
     const activo = c && c.querySelector('.tab.on');
     if (activo) activo.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+  }, [s.vista]);
+  useEffect(() => {
+    const g = GRUPOS_MENU.find(gr => gr.hijos.includes(s.vista));
+    if (g) setGruposAbiertos(ant => (ant.has(g.clave) ? ant : new Set(ant).add(g.clave)));
   }, [s.vista]);
 
   // el aviso de versión nueva también tiene que verse antes de entrar
@@ -14376,20 +14441,34 @@ function App() {
   return html`<div id="app" class=${arriba ? 'arriba' : ''}>
     <div class=${'barra no-imprimir' + (arriba ? ' arriba' : '') + (s.barraColapsada ? ' colapsada' : '')}>
       <div class="barra-cab">
-        <button class="btn-colapsar" title="Esconder los módulos" onClick=${alternarBarra}>☰</button>
-        <button class="btn-posicion"
-          title=${arriba ? 'Pasar los módulos a la izquierda' : 'Pasar los módulos arriba'}
-          onClick=${alternarPosicionBarra}>${arriba ? '⬅' : '⬆'}</button>
         <div class="marca">
           <img src=${LOGO_BLANCO} alt="ENSA" />
           <span>Gestión general<br />posventa</span>
         </div>
       </div>
       <div class="tabs-caja" ref=${tabsRef}>
-        ${visibles.map(([k, rotulo]) => html`<button class=${'tab ' + (vista[0] === k ? 'on' : '')}
-          onClick=${() => set({ vista: k })}>${rotulo}</button>`)}
+        ${armarMenu(visibles).map(item => item.tipo === 'vista'
+          ? html`<button class=${'tab ' + (vista[0] === item.clave ? 'on' : '')}
+              onClick=${() => set({ vista: item.clave })}>${item.rotulo}</button>`
+          : html`<${Fragment} key=${item.clave}>
+              <button class=${'tab tab-grupo' + (item.hijos.some(h => h.clave === vista[0]) ? ' on-hijo' : '')}
+                title=${gruposAbiertos.has(item.clave) ? `Cerrar ${item.rotulo}` : `Abrir ${item.rotulo}`}
+                onClick=${() => alternarGrupoMenu(item.clave)}>
+                <span class="crece">${item.rotulo}</span>
+                <span aria-hidden="true">${gruposAbiertos.has(item.clave) ? '▾' : '▸'}</span>
+              </button>
+              ${gruposAbiertos.has(item.clave) && item.hijos.map(h => html`<button
+                class=${'tab tab-hijo ' + (vista[0] === h.clave ? 'on' : '')}
+                onClick=${() => set({ vista: h.clave })}>${h.rotulo}</button>`)}
+            </${Fragment}>`)}
       </div>
       <div class="der">
+        <div class="barra-utilidades">
+          <button class="btn-colapsar" title="Esconder los módulos" onClick=${alternarBarra}>☰</button>
+          <button class="btn-posicion"
+            title=${arriba ? 'Pasar los módulos a la izquierda' : 'Pasar los módulos arriba'}
+            onClick=${alternarPosicionBarra}>${arriba ? '⬅' : '⬆'}</button>
+        </div>
         ${!s.enLinea && html`<span class="et rojo" title="Seguí trabajando: todo se guarda en esta computadora y se sube cuando vuelva internet">
           ● Sin internet</span>`}
         ${s.pendientes > 0 && html`<span class="et ambar"
