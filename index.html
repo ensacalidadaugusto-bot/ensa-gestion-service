@@ -11783,13 +11783,48 @@ function guardarColumnasGrillaLlamado(lista) {
   try { localStorage.setItem(CLAVE_COLUMNAS_GRILLA_LLAMADO, JSON.stringify(lista)); } catch (e) { /* sin localStorage, no se persiste */ }
 }
 
+/* Ancho de cada columna de la grilla, a pedido de Augusto (05/11/2026:
+   "PERMITI MODIFICAR EL ANCHO DE CADA COLUMNA DE LA TABLA") -- mismo
+   mecanismo que ya usa el Registro de Service (colgroup + tirador +
+   localStorage), con su propia clave, separada de la de columnas
+   visibles: achicar o agrandar una columna no tiene nada que ver con
+   mostrarla u ocultarla. Las ocho columnas fijas también se pueden
+   resizar, además de las extra que se vayan sumando con "⚙ Columnas". */
+const CLAVE_ANCHOS_GRILLA_LLAMADO = 'ensa_anchos_grilla_llamado';
+function anchosGrillaLlamado() {
+  try {
+    const guardado = JSON.parse(localStorage.getItem(CLAVE_ANCHOS_GRILLA_LLAMADO));
+    return (guardado && typeof guardado === 'object') ? guardado : {};
+  } catch (e) { return {}; }
+}
+function guardarAnchosGrillaLlamado(anchos) {
+  try { localStorage.setItem(CLAVE_ANCHOS_GRILLA_LLAMADO, JSON.stringify(anchos)); } catch (e) { /* sin localStorage, no se persiste */ }
+}
+
+/** Las ocho columnas fijas de la grilla, en el orden en que se pintan --
+    las mismas de siempre, ahora como lista (antes estaban escritas a
+    mano en el <thead>) para poder darle a cada una su <col> y su
+    tirador de ancho igual que a las extra. "campo" es por el que se
+    puede ordenar (null en las que no tienen un campo propio, como
+    "Cliente / teléfono" o "Trabajo"). */
+const COLUMNAS_FIJAS_LLAMADO = [
+  { id: 'numero', rot: 'N° LL', campo: 'numero' },
+  { id: 'fecha_llamada', rot: 'Fecha', campo: 'fecha_llamada' },
+  { id: 'cliente', rot: 'Cliente / teléfono', campo: null },
+  { id: 'equipo', rot: 'Equipo', campo: null },
+  { id: 'tipo_llamado', rot: 'Tipo', campo: 'tipo_llamado' },
+  { id: 'estado_llamado', rot: 'Estado', campo: 'estado_llamado' },
+  { id: 'trabajo', rot: 'Trabajo', campo: null },
+  { id: 'registrado_por', rot: 'Registrado por', campo: null },
+];
+
 /** Panel para elegir qué columnas extra se suman a la grilla de llamados.
     "visibles" y "alCambiar" vienen de SoporteTecnico (estado en memoria,
     ya leído de localStorage al abrir la pantalla). Separado del panel de
     la ficha (CamposVisiblesLlamado): acá el default es "ninguna" (salvo
     las que pidió Augusto), no "todas", porque sumar una columna de más a
     la grilla se nota más que en una ficha de un solo llamado. */
-function ColumnasGrillaLlamado({ visibles, alCambiar, alCerrar }) {
+function ColumnasGrillaLlamado({ visibles, alCambiar, alCerrar, alRestablecerAnchos }) {
   const alternar = campo => {
     const nuevas = visibles.includes(campo) ? visibles.filter(c => c !== campo) : [...visibles, campo];
     alCambiar(nuevas);
@@ -11798,7 +11833,8 @@ function ColumnasGrillaLlamado({ visibles, alCambiar, alCerrar }) {
     <div class="mini" style="margin-bottom:10px">
       Tildá las columnas que querés sumar a la lista de llamados, además de las fijas
       (N° LL, Fecha, Cliente/teléfono, Equipo, Tipo, Estado, Trabajo, Registrado por).
-      Es una preferencia tuya, de este navegador.
+      Es una preferencia tuya, de este navegador. El ancho de cada columna se ajusta
+      arrastrando el borde derecho de su encabezado, en la grilla.
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px">
       ${EXTRA_COLUMNAS_GRILLA_LLAMADO.map(c => html`
@@ -11807,9 +11843,13 @@ function ColumnasGrillaLlamado({ visibles, alCambiar, alCerrar }) {
           ${ETIQUETA_CAMPO_LLAMADO[c]}
         </label>`)}
     </div>
-    <div class="fila" style="justify-content:flex-end;margin-top:14px">
-      <button onClick=${() => alCambiar([])}>Ninguna</button>
-      <button onClick=${() => alCambiar(EXTRA_COLUMNAS_GRILLA_LLAMADO.slice())}>Todas</button>
+    <div class="fila" style="justify-content:space-between;margin-top:14px">
+      <button class="btn sec chico" title="Volver cada columna a su ancho original"
+        onClick=${alRestablecerAnchos}>Restablecer anchos</button>
+      <div class="fila">
+        <button onClick=${() => alCambiar([])}>Ninguna</button>
+        <button onClick=${() => alCambiar(EXTRA_COLUMNAS_GRILLA_LLAMADO.slice())}>Todas</button>
+      </div>
     </div>
   <//>`;
 }
@@ -11845,6 +11885,62 @@ function SoporteTecnico() {
   const cambiarColGrilla = lista => { setColGrilla(lista); guardarColumnasGrillaLlamado(lista); };
   const colVisibles = EXTRA_COLUMNAS_GRILLA_LLAMADO.filter(c => colGrilla.includes(c));
   const caja = useRef(null);
+
+  /* Ancho de cada columna, a gusto de quien la mire -- mismo mecanismo
+     que ya usa el Registro de Service (ver Trabajos()): un ref además
+     del estado, para que arrastrar no dependa de que React ya haya
+     vuelto a renderizar entre un movimiento del mouse y el siguiente. */
+  const [anchosLl, setAnchosLl] = useState(anchosGrillaLlamado);
+  const anchosLlRef = useRef(anchosLl);
+  const resizeLlRef = useRef(null);
+  function iniciarResizeLl(e, id) {
+    e.preventDefault(); e.stopPropagation();
+    const th = e.currentTarget.closest('th');
+    const anchoInicial = (th && th.getBoundingClientRect().width) || anchosLlRef.current[id] || 120;
+    resizeLlRef.current = { id, xInicial: e.clientX, anchoInicial };
+    window.addEventListener('mousemove', moverResizeLl);
+    window.addEventListener('mouseup', terminarResizeLl);
+  }
+  function moverResizeLl(e) {
+    const r = resizeLlRef.current;
+    if (!r) return;
+    const nuevo = Math.max(40, Math.min(520, Math.round(r.anchoInicial + (e.clientX - r.xInicial))));
+    const next = { ...anchosLlRef.current, [r.id]: nuevo };
+    anchosLlRef.current = next;
+    setAnchosLl(next);
+  }
+  function terminarResizeLl() {
+    window.removeEventListener('mousemove', moverResizeLl);
+    window.removeEventListener('mouseup', terminarResizeLl);
+    resizeLlRef.current = null;
+    guardarAnchosGrillaLlamado(anchosLlRef.current);
+  }
+  function restablecerAnchosLl() {
+    anchosLlRef.current = {};
+    setAnchosLl({});
+    guardarAnchosGrillaLlamado({});
+  }
+  /* El ancho se fija con "width/min-width/max-width" en píxeles, puesto a
+     la vez en el <th> y en cada <td> de la columna -- no con <colgroup>,
+     que en esta tabla (table-layout normal, a diferencia de la del
+     Registro de Service, que es "fixed") el navegador termina ignorando
+     y la columna no se mueve. Puesto en cada celda, en cambio, sí hace
+     que la columna respete el ancho elegido, achicando o agrandando. */
+  function anchoEstiloLl(id) {
+    const v = anchosLl[id];
+    return v ? `width:${v}px;min-width:${v}px;max-width:${v}px` : '';
+  }
+  /** Encabezado de una columna de esta grilla: ordena al hacer clic (si
+      tiene campo) y siempre trae su tirador para achicarla o agrandarla. */
+  function cabeceraLl(id, rot, campo) {
+    const act = campo && orden.campo === campo;
+    return html`<th key=${id} style=${anchoEstiloLl(id)}
+        onClick=${campo ? () => setOrden({ campo, asc: act ? !orden.asc : false }) : undefined}>
+      ${rot}${act ? (orden.asc ? ' ▲' : ' ▼') : ''}
+      <span class="resize-handle" title="Arrastrar para cambiar el ancho"
+        onMouseDown=${e => iniciarResizeLl(e, id)} onClick=${e => e.stopPropagation()}></span>
+    </th>`;
+  }
 
   const recargar = useCallback(async () => {
     setError(null);
@@ -11965,33 +12061,26 @@ function SoporteTecnico() {
     <div class="tabla-caja panel" ref=${caja}>
       <table class="grilla">
         <thead><tr>
-          <${Th} campo="numero" rot="N° LL" orden=${orden} setOrden=${setOrden} />
-          <${Th} campo="fecha_llamada" rot="Fecha" orden=${orden} setOrden=${setOrden} />
-          <th>Cliente / teléfono</th>
-          <th>Equipo</th>
-          <${Th} campo="tipo_llamado" rot="Tipo" orden=${orden} setOrden=${setOrden} />
-          <${Th} campo="estado_llamado" rot="Estado" orden=${orden} setOrden=${setOrden} />
-          <th>Trabajo</th>
-          <th>Registrado por</th>
-          ${colVisibles.map(c => html`<th key=${c}>${ETIQUETA_CAMPO_LLAMADO[c]}</th>`)}
+          ${COLUMNAS_FIJAS_LLAMADO.map(c => cabeceraLl(c.id, c.rot, c.campo))}
+          ${colVisibles.map(c => cabeceraLl(c, ETIQUETA_CAMPO_LLAMADO[c], null))}
         </tr></thead>
         <tbody>
           ${filtradas.map(x => html`<tr key=${x.id} style="cursor:pointer" class=${x.atendido_por ? '' : 'sin-atender'}
               onClick=${() => setAbierto({ id: x.id })}
               title=${x.atendido_por ? '' : 'Sin atender: todavía no se completó quién atendió este llamado ("Atendido por" / "Respuesta" del Excel).'}>
-            <td><b>${x.n_ll}</b></td>
-            <td>${fecha(x.fecha_llamada)}</td>
-            <td>${x.cliente_nombre || html`<span class="mini">sin identificar</span>`}${x.telefono ? ' · ' + x.telefono : ''}</td>
-            <td>${x.equipo_serie || html`<span class="mini">—</span>`}</td>
-            <td>${x.tipo_llamado || '—'}</td>
-            <td>${x.estado_llamado ? html`<${Et} txt=${x.estado_llamado} mapa=${COLOR_ESTADO_LLAMADO} />` : '—'}</td>
-            <td>${x.trabajo_id
+            <td style=${anchoEstiloLl('numero')}><b>${x.n_ll}</b></td>
+            <td style=${anchoEstiloLl('fecha_llamada')}>${fecha(x.fecha_llamada)}</td>
+            <td style=${anchoEstiloLl('cliente')}>${x.cliente_nombre || html`<span class="mini">sin identificar</span>`}${x.telefono ? ' · ' + x.telefono : ''}</td>
+            <td style=${anchoEstiloLl('equipo')}>${x.equipo_serie || html`<span class="mini">—</span>`}</td>
+            <td style=${anchoEstiloLl('tipo_llamado')}>${x.tipo_llamado || '—'}</td>
+            <td style=${anchoEstiloLl('estado_llamado')}>${x.estado_llamado ? html`<${Et} txt=${x.estado_llamado} mapa=${COLOR_ESTADO_LLAMADO} />` : '—'}</td>
+            <td style=${anchoEstiloLl('trabajo')}>${x.trabajo_id
               ? html`<a href="#" onClick=${e => { e.preventDefault(); e.stopPropagation(); setVerTrabajoId(x.trabajo_id); }}>ver trabajo</a>`
               : html`<span class="mini">—</span>`}</td>
-            <td class="mini">${x.registrado_por || '—'}</td>
+            <td class="mini" style=${anchoEstiloLl('registrado_por')}>${x.registrado_por || '—'}</td>
             ${colVisibles.map(c => { const v = c === 'fecha_coordinada' ? fecha(x[c]) : x[c];
               return html`<td key=${c} class="mini" title=${x[c] || ''}
-                style="max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${v || '—'}</td>`; })}
+                style=${`max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${anchoEstiloLl(c)}`}>${v || '—'}</td>`; })}
           </tr>`)}
           ${!filtradas.length && html`<tr><td colspan=${8 + colVisibles.length} class="vacio">No hay llamados con este filtro.</td></tr>`}
         </tbody>
@@ -12008,15 +12097,21 @@ function SoporteTecnico() {
     ${importando && html`<${ImportarLlamados} alCerrar=${() => setImportando(false)} datosExistentes=${datos}
       alImportar=${nuevas => setDatos(d => [...(d || []), ...nuevas].sort((a, b) => b.numero - a.numero))} />`}
     ${verColumnas && html`<${ColumnasGrillaLlamado} visibles=${colGrilla} alCambiar=${cambiarColGrilla}
-      alCerrar=${() => setVerColumnas(false)} />`}
+      alCerrar=${() => setVerColumnas(false)} alRestablecerAnchos=${restablecerAnchosLl} />`}
   </div>`;
 }
 
 /** Lo que se precarga en la ficha del trabajo nuevo al generarlo desde un
     llamado: cliente, equipo y N° LL (LL<número del llamado>), tal como se
     confirmó con Augusto. El detalle del llamado pasa a observaciones del
-    servicio, y un comentario interno deja la referencia al llamado de
-    origen, para quien abra el trabajo más adelante sepa de dónde salió. */
+    servicio. A pedido de Augusto (05/11/2026: "QUE NO ME APAREZCA
+    'Generado desde el llamado...' NI NINGUN COMENTARIO, ESO LO DEBEMOS
+    LLENAR NOSOTROS LUEGO DE QUE SE REALIZÓ EL TRABAJO"), ya no se precarga
+    ningún comentario interno -- el campo queda vacío, para completarlo a
+    mano después de hacer el trabajo. La referencia al llamado de origen
+    sigue intacta por otro lado: queda en "N° LL" (el enlace que ya usa
+    "ver trabajo"/"ya generó el trabajo" para saber si un llamado generó
+    su trabajo), así que no se pierde trazabilidad por sacar el texto. */
 function precargaDesdeLlamado(l) {
   const obs = [l.localizacion_problema, l.detalles_llamado, l.sugerencia_accion]
     .filter(Boolean).join('\n');
@@ -12025,8 +12120,6 @@ function precargaDesdeLlamado(l) {
     cliente_id: l.cliente_id || null,
     equipo_id: l.equipo_id || null,
     obs_servicio: obs || null,
-    comentarios: `Generado desde el llamado ${l.n_ll} de la línea de soporte técnico (${fecha(l.fecha_llamada) || ''}).`
-      + (l.accion_correctiva ? `\nAcción correctiva sugerida: ${l.accion_correctiva}` : ''),
     fecha_visita: l.fecha_coordinada || null,
   };
 }
@@ -14349,6 +14442,7 @@ async function iniciar() {
 }
 
 iniciar();
+
 
 </script>
 </body>
