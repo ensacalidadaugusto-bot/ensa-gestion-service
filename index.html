@@ -174,7 +174,16 @@ a{color:var(--acento)}
    (ahí arriba quedaba sólo el logo y el título, apretados contra los
    íconos) y pasaron a vivir junto con el resto de los controles de la
    barra (tema, usuario), del otro extremo -- abajo si la barra está a
-   la izquierda, al final de la fila si está arriba. */
+   la izquierda, al final de la fila si está arriba. Con la barra a la
+   izquierda, la marca quedó sola en el encabezado -- sin los botones al
+   lado que antes ocupaban el resto del ancho, se la ve pegada contra el
+   filo izquierdo con un hueco vacío a la derecha. Augusto lo notó
+   ("el logo y titulo quedaron descentrados"): se centra el encabezado
+   para que la marca quede en el medio de ese espacio, igual que antes
+   de sacar los botones. Arriba no hace falta -- ahí la marca ya está
+   pegada al único lugar que le corresponde, al principio de la fila,
+   antes de la lista de módulos. */
+.barra:not(.arriba) .barra-cab{justify-content:center}
 .barra-utilidades{display:flex;gap:7px;justify-content:center;flex:0 0 auto}
 .btn-colapsar,.btn-posicion{background:transparent;border:0;color:var(--barra-texto);cursor:pointer;
   font-size:17px;line-height:1;padding:5px 7px;border-radius:6px;flex:0 0 auto}
@@ -203,11 +212,29 @@ a{color:var(--acento)}
    con una flechita (▸ cerrado, ▾ abierto) empujada al otro extremo; sus
    módulos, cuando está abierto, son más .tab de siempre, uno después del
    otro en la misma lista -- así se desplazan solos con el resto si no
-   entran todos, sin agregar ningún recuadro flotante propio. */
+   entran todos, sin agregar ningún recuadro flotante propio (ver más
+   abajo .grupo-menu, que agrega el recuadro que los distingue de un
+   módulo suelto).
+
+   Ajuste (05/11/2026): Augusto, viendo la barra arriba, comentó que no
+   se notaba que "Productividad", "Tablero" y "Coordinación..." quedaran
+   adentro de "Gestión" -- en una franja horizontal, el título del grupo
+   y sus tres módulos se veían como cuatro pestañas sueltas, una al lado
+   de la otra, sin nada que las uniera. .grupo-menu envuelve el título y
+   (cuando está abierto) sus módulos en un único recuadro con fondo
+   propio, redondeado -- en vez de una fila de pestañas indistintas,
+   ahora se ve de un vistazo que todo eso es "una sola cosa" con el
+   nombre "Gestión" como título, parecido a un menú desplegable, aunque
+   siga siendo parte de la misma lista (no un cuadro flotante aparte),
+   por la misma razón de desplazamiento que ya se explicó arriba. */
+.grupo-menu{display:flex;border-radius:9px;background:rgba(255,255,255,.055)}
+.barra:not(.arriba) .grupo-menu{flex-direction:column;padding:2px 0}
+.barra.arriba .grupo-menu{align-items:center;gap:1px;padding:3px}
 .tab-grupo{display:flex;align-items:center;gap:8px}
 .barra:not(.arriba) .tab-grupo{width:100%;justify-content:space-between}
-.tab-grupo.on-hijo{background:rgba(255,255,255,.1);font-weight:600}
+.tab-grupo.on-hijo{background:rgba(255,255,255,.12);font-weight:600}
 .barra:not(.arriba) .tab-hijo{padding-left:30px;font-size:12.5px}
+.barra.arriba .tab-hijo{font-size:12px;padding:8px 11px}
 .barra .der{margin-top:auto;display:flex;flex-direction:column;align-items:stretch;gap:8px;
   font-size:12px;flex:0 0 auto}
 .barra.arriba .der{margin-top:0;margin-left:auto;flex-direction:row;align-items:center}
@@ -14450,17 +14477,17 @@ function App() {
         ${armarMenu(visibles).map(item => item.tipo === 'vista'
           ? html`<button class=${'tab ' + (vista[0] === item.clave ? 'on' : '')}
               onClick=${() => set({ vista: item.clave })}>${item.rotulo}</button>`
-          : html`<${Fragment} key=${item.clave}>
+          : html`<div class="grupo-menu" key=${item.clave}>
               <button class=${'tab tab-grupo' + (item.hijos.some(h => h.clave === vista[0]) ? ' on-hijo' : '')}
                 title=${gruposAbiertos.has(item.clave) ? `Cerrar ${item.rotulo}` : `Abrir ${item.rotulo}`}
                 onClick=${() => alternarGrupoMenu(item.clave)}>
                 <span class="crece">${item.rotulo}</span>
                 <span aria-hidden="true">${gruposAbiertos.has(item.clave) ? '▾' : '▸'}</span>
               </button>
-              ${gruposAbiertos.has(item.clave) && item.hijos.map(h => html`<button
+              ${gruposAbiertos.has(item.clave) && item.hijos.map(h => html`<button key=${h.clave}
                 class=${'tab tab-hijo ' + (vista[0] === h.clave ? 'on' : '')}
                 onClick=${() => set({ vista: h.clave })}>${h.rotulo}</button>`)}
-            </${Fragment}>`)}
+            </div>`)}
       </div>
       <div class="der">
         <div class="barra-utilidades">
