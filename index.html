@@ -54,7 +54,7 @@
   --fila-cobrar:#fdfcf7;   --fila-cobrar-h:#f7f2e3;
   --fila-brillo:#fde68a;
   --sombra:0 1px 3px rgba(16,32,48,.10), 0 6px 20px rgba(16,32,48,.06);
-  --radio:8px; --alto-barra:52px;
+  --radio:8px; --ancho-barra:200px;
   /* ---- mate funcional (flat / material) ----
      Colores planos y sin degradé; el relieve se usa sólo donde separa un
      bloque de otro (paneles y ventanas sobre el fondo de la pantalla), no
@@ -128,41 +128,70 @@ a{color:var(--acento)}
 .oculto{display:none!important}
 
 /* ---------- layout ---------- */
-#app{display:flex;flex-direction:column;height:100vh;overflow:hidden}
-.barra{height:var(--alto-barra);background:var(--barra);color:#fff;display:flex;align-items:center;
-  gap:6px;padding:0 14px;flex:0 0 auto;box-shadow:0 1px 0 rgba(255,255,255,.08) inset}
-.barra .marca{display:flex;align-items:center;gap:11px;margin-right:16px;white-space:nowrap}
-.barra .marca img{height:21px;width:auto;display:block}
-.barra .marca span{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--barra-texto);
-  border-left:1px solid var(--barra-linea);padding-left:11px;line-height:1.25}
+/* La barra de módulos pasó de ser una franja arriba a una columna fija a
+   la izquierda, a pedido de Augusto (05/11/2026): "la barra horizontal
+   superior donde puedo deslizarme por todos los modulos, que te parece
+   si la ponemos vertical a la izquierda y que sea escondible con un
+   botón". Por eso #app ahora acomoda sus dos hijos uno al lado del otro
+   (columna + contenido) en vez de uno encima del otro. */
+#app{display:flex;flex-direction:row;height:100vh;overflow:hidden}
+.barra{width:var(--ancho-barra);background:var(--barra);color:#fff;display:flex;flex-direction:column;
+  gap:10px;padding:12px 10px;flex:0 0 auto;box-shadow:-1px 0 0 rgba(255,255,255,.08) inset;
+  overflow:hidden;transition:width .15s ease,padding .15s ease}
+/* escondida: a diferencia de un "angosto" (con sólo los íconos), Augusto
+   pidió que se pueda esconder -- así que colapsada el ancho se va a 0 y
+   el contenido pasa a ocupar todo el lugar. Para volver a abrirla queda
+   el botón flotante de acá abajo (.btn-mostrar-barra). */
+.barra.colapsada{width:0;padding:0;gap:0;box-shadow:none}
+.barra .barra-cab{display:flex;align-items:center;gap:7px;flex:0 0 auto}
+.btn-colapsar{background:transparent;border:0;color:var(--barra-texto);cursor:pointer;font-size:17px;
+  line-height:1;padding:5px 7px;border-radius:6px;flex:0 0 auto}
+.btn-colapsar:hover{background:rgba(255,255,255,.12);color:#fff}
+.btn-mostrar-barra{position:fixed;left:12px;top:12px;z-index:80;background:var(--barra);color:#fff;
+  border:0;border-radius:8px;padding:8px 11px;font-size:16px;line-height:1;cursor:pointer;
+  box-shadow:var(--sombra-chica)}
+.btn-mostrar-barra:hover{background:var(--azul-osc)}
+.barra .marca{display:flex;flex-direction:column;gap:4px;white-space:nowrap;min-width:0}
+.barra .marca img{height:22px;width:auto;display:block}
+.barra .marca span{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--barra-texto);
+  line-height:1.3;white-space:normal}
 .tab{background:transparent;border:0;color:var(--barra-texto);padding:8px 13px;border-radius:6px;cursor:pointer;white-space:nowrap}
 .tab:hover{background:rgba(255,255,255,.12);color:#fff}
 .tab.on{background:var(--papel);color:var(--texto);font-weight:600}
-.barra .der{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:12px;flex:0 0 auto}
-/* ---- pestañas de módulos: en una pantalla angosta (tablet, celular) no
-   entran todas -- esta caja se desplaza de costado (con el dedo, con el
-   mouse o con las flechas) en lugar de cortarse fuera de la pantalla sin
-   ninguna forma de llegar a ellas. La marca y el menú de usuario quedan
-   siempre fijos a los costados, sólo esto de acá adentro se achica. ---- */
-.barra .tabs-caja{display:flex;gap:6px;overflow-x:auto;overflow-y:hidden;flex:1 1 auto;min-width:0;
-  -webkit-overflow-scrolling:touch;scroll-behavior:smooth;
+/* dentro de la columna, cada módulo es una fila entera (no una pastilla
+   al lado de la otra); fuera de la columna (la pestaña de "Pedido /
+   Cobranza / Historial" adentro de una ficha, por ejemplo) sigue
+   funcionando como pastilla horizontal, sin cambios. */
+.barra .tab{display:block;width:100%;text-align:left}
+.barra .der{margin-top:auto;display:flex;flex-direction:column;align-items:stretch;gap:8px;
+  font-size:12px;flex:0 0 auto}
+/* ---- lista de módulos: puede haber más de los que entran en la altura
+   de la pantalla -- esta caja se desplaza de arriba a abajo (con el
+   dedo, con el mouse o con la rueda) en vez de cortarse sin forma de
+   llegar a los de más abajo. La marca queda siempre fija arriba y el
+   usuario/tema siempre fijos abajo; sólo esto de en medio se achica. ---- */
+.barra .tabs-caja{display:flex;flex-direction:column;gap:3px;overflow-y:auto;overflow-x:hidden;
+  flex:1 1 auto;min-width:0;min-height:0;scroll-behavior:smooth;
   scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.35) transparent}
-.barra .tabs-caja::-webkit-scrollbar{height:5px}
+.barra .tabs-caja::-webkit-scrollbar{width:5px}
 .barra .tabs-caja::-webkit-scrollbar-track{background:transparent}
 .barra .tabs-caja::-webkit-scrollbar-thumb{background:rgba(255,255,255,.35);border-radius:10px}
 .barra .tabs-caja::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.55)}
-.flecha-tabs{background:transparent;border:0;color:var(--barra-texto);cursor:pointer;
-  padding:0 3px;font-size:19px;line-height:1;flex:0 0 auto;align-self:stretch}
-.flecha-tabs:hover:not(:disabled){color:#fff}
-.flecha-tabs:disabled{opacity:.25;cursor:default}
-.chip-user{background:rgba(255,255,255,.15);padding:5px 10px;border-radius:20px;cursor:pointer}
+.chip-user{background:rgba(255,255,255,.15);padding:5px 10px;border-radius:20px;cursor:pointer;
+  text-align:center;white-space:normal}
 /* botón de modo claro / oscuro */
 .btn-tema{background:rgba(255,255,255,.12);border:0;color:var(--barra-texto);cursor:pointer;
-  border-radius:20px;padding:5px 11px;display:flex;align-items:center;gap:6px;font-size:12px;line-height:1}
+  border-radius:20px;padding:5px 11px;display:flex;align-items:center;justify-content:center;gap:6px;
+  font-size:12px;line-height:1}
 .btn-tema:hover{background:rgba(255,255,255,.22);color:#fff}
 .btn-tema span[aria-hidden]{font-size:13px}
-@media (max-width:1100px){.btn-tema .rot-tema{display:none}}
-.contenido{flex:1;overflow:auto;padding:12px}
+.contenido{flex:1;overflow:auto;padding:12px;min-width:0}
+/* en una pantalla angosta (tablet, celular) la columna fija deja muy poco
+   lugar para el contenido -- ahí se abre "flotando" por encima en vez de
+   empujarlo, y arranca escondida (ver barraColapsada en app.js) */
+@media (max-width:860px){
+  .barra{position:fixed;left:0;top:0;height:100vh;z-index:78;box-shadow:2px 0 14px rgba(0,0,0,.28)}
+}
 
 /* ---------- controles ---------- */
 /* Botones: color plano y sin degradé, con la elevación mínima de Material
@@ -217,7 +246,7 @@ label.campo>span{display:block;font-size:11px;color:var(--suave);margin-bottom:3
   border-top:1px solid var(--borde);border-radius:0 0 var(--radio) var(--radio)}
 .deslizador .mini{color:var(--suave);margin:0 2px}
 .deslizador .btn{min-width:30px;font-size:13px;line-height:1}
-.tabla-caja{overflow:auto;max-height:calc(100vh - var(--alto-barra) - 132px);border-radius:var(--radio)}
+.tabla-caja{overflow:auto;max-height:calc(100vh - 132px);border-radius:var(--radio)}
 /* ---- barra de desplazamiento siempre visible ----
    En Windows y buena parte de Linux la barra ya se ve fija; en Mac (y en
    cualquier sistema con "barras superpuestas") el navegador la esconde
@@ -1147,6 +1176,7 @@ table.grilla.tabla-inspectores tbody tr:hover{cursor:default}
 div.campo{display:block;margin-bottom:9px}
 div.campo>span{display:block;font-size:11px;color:var(--suave);margin-bottom:3px;text-transform:uppercase;letter-spacing:.3px}
 
+
 </style>
 </head>
 <body>
@@ -1222,7 +1252,7 @@ const S = {
   enLinea: true, pendientes: 0, subiendo: false, errorGrave: null, faltanColumnas: null,
   destacado: null, desdeCache: null, reconfigurar: false, irACobranza: null,
   sePuedeInstalar: false, instalada: false, instalarEnIOS: false, hayVersionNueva: false,
-  verInstalarIOS: false, tema: 'auto',
+  verInstalarIOS: false, tema: 'auto', barraColapsada: false,
 };
 const subs = new Set();
 function set(parcial) { Object.assign(S, parcial); subs.forEach(f => f()); }
@@ -2285,6 +2315,18 @@ function ponerTema(t) {
   set({ tema: t });
   try { localStorage.setItem('tema_service', t); } catch (e) {}
   pintarTema();
+}
+
+/* Mostrar/esconder la columna de módulos: lo que elija cada uno queda
+   guardado en esta computadora, así que no hay que volver a escondarla
+   cada vez que se entra. */
+function prepararBarra() {
+  try { if (localStorage.getItem('barra_colapsada') === '1') S.barraColapsada = true; } catch (e) {}
+}
+function alternarBarra() {
+  const v = !S.barraColapsada;
+  set({ barraColapsada: v });
+  try { localStorage.setItem('barra_colapsada', v ? '1' : '0'); } catch (e) {}
 }
 
 /** el botón de la barra: un toque pasa al siguiente modo */
@@ -3768,9 +3810,11 @@ function Resumen({ items }) {
    DESPLAZAMIENTO HORIZONTAL
    La planilla tiene más columnas de las que entran en pantalla. Estos
    botones la corren sin tener que usar la barra de abajo ni el mouse.
-   Lo mismo le hace falta a la barra de pestañas de arriba en una pantalla
-   angosta (tablet, celular) -- por eso la lógica de medir y correr vive
-   en un hook aparte, que Deslizador y la barra de pestañas comparten.
+   (Hasta el 05/11/2026 la barra de módulos de arriba también usaba este
+   hook, para desplazarse de costado en una pantalla angosta; al pasar a
+   ser una columna vertical a la izquierda, se desplaza sola, de arriba
+   a abajo, con su propia barrita -- ver ".barra .tabs-caja" en el CSS --
+   y ya no hace falta este mecanismo ahí. Deslizador sigue usándolo.)
    ===================================================================== */
 function useDesplazamiento(para) {
   const [estado, setEstado] = useState({ hay: false, ini: true, fin: false });
@@ -14241,12 +14285,10 @@ function App() {
   const s = useS();
   const [menu, setMenu] = useState(false);
   const [cambiarClave, setCambiarClave] = useState(false);
-  /* Barra de pestañas: en una pantalla angosta (tablet, celular) no entran
-     todos los módulos. tabsRef+useDesplazamiento se declaran siempre, antes
-     de los "return" de abajo, para no romper el orden de hooks entre la
-     pantalla de login y la aplicación ya adentro. */
+  /* Columna de módulos: tabsRef se declara siempre, antes de los "return"
+     de abajo, para no romper el orden de hooks entre la pantalla de login
+     y la aplicación ya adentro. */
   const tabsRef = useRef(null);
-  const { estado: estadoTabs, correr: correrTabs } = useDesplazamiento(tabsRef);
   // si se cambia de pestaña por otro medio (o al entrar), que la activa quede a la vista
   useEffect(() => {
     const c = tabsRef.current;
@@ -14267,19 +14309,18 @@ function App() {
   const visibles = vistasDe(rol());
   const vista = visibles.find(v => v[0] === s.vista) || visibles[0];
   return html`<div id="app">
-    <div class="barra no-imprimir">
-      <div class="marca">
-        <img src=${LOGO_BLANCO} alt="ENSA" />
-        <span>Gestión general<br />posventa</span>
+    <div class=${'barra no-imprimir' + (s.barraColapsada ? ' colapsada' : '')}>
+      <div class="barra-cab">
+        <button class="btn-colapsar" title="Esconder los módulos" onClick=${alternarBarra}>☰</button>
+        <div class="marca">
+          <img src=${LOGO_BLANCO} alt="ENSA" />
+          <span>Gestión general<br />posventa</span>
+        </div>
       </div>
-      ${estadoTabs.hay && html`<button class="flecha-tabs" disabled=${estadoTabs.ini}
-        title="Módulos anteriores" onClick=${() => correrTabs(-1)}>‹</button>`}
       <div class="tabs-caja" ref=${tabsRef}>
         ${visibles.map(([k, rotulo]) => html`<button class=${'tab ' + (vista[0] === k ? 'on' : '')}
           onClick=${() => set({ vista: k })}>${rotulo}</button>`)}
       </div>
-      ${estadoTabs.hay && html`<button class="flecha-tabs" disabled=${estadoTabs.fin}
-        title="Módulos siguientes" onClick=${() => correrTabs(1)}>›</button>`}
       <div class="der">
         ${!s.enLinea && html`<span class="et rojo" title="Seguí trabajando: todo se guarda en esta computadora y se sube cuando vuelva internet">
           ● Sin internet</span>`}
@@ -14293,7 +14334,9 @@ function App() {
           ${nombreUsuario()} · ${NOMBRE_ROL[rol()] || rol()} ▾</span>
       </div>
     </div>
-    ${menu && html`<div style="position:absolute;right:12px;top:48px;z-index:70" class="panel">
+    ${s.barraColapsada && html`<button class="btn-mostrar-barra no-imprimir" title="Mostrar los módulos"
+      onClick=${alternarBarra}>☰</button>`}
+    ${menu && html`<div style="position:fixed;left:14px;bottom:72px;z-index:70" class="panel">
       <div class="panel-cuerpo">
         <div class="mini">${s.usuario.email}</div>
         ${(s.sePuedeInstalar || s.instalarEnIOS) && !s.instalada && html`<div class="aviso"
@@ -14403,6 +14446,7 @@ function vigilarEsquina() {
    --------------------------------------------------------------------- */
 async function iniciar() {
   prepararTema();
+  prepararBarra();
   render(html`<${App} />`, document.getElementById('raiz'));
   vigilarEsquina();
   prepararInstalacion();
