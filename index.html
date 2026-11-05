@@ -11697,7 +11697,7 @@ const CAMPOS_LLAMADO = [
     No incluye cliente_id/equipo_id (van siempre, no son "campos" sueltos
     sino el enlace con Clientes y Equipos). */
 const ETIQUETA_CAMPO_LLAMADO = {
-  fecha_llamada: 'Fecha de llamada', registrado_por: 'Registrado por', atendido_por: 'Atendido por',
+  fecha_llamada: 'Fecha de llamada', registrado_por: 'Registrado por', atendido_por: 'Resolución/Comunicación',
   nombre_cliente: 'Cliente (nombre suelto)', telefono: 'Teléfono', correo: 'Correo electrónico',
   direccion: 'Dirección', localidad: 'Localidad', n_serie: 'N° de serie', modelo_equipo: 'Modelo',
   motorizacion: 'Motorización', cantidad_paradas: 'Cantidad de paradas', tipo_llamado: 'Tipo de llamado',
@@ -12032,7 +12032,7 @@ function SoporteTecnico() {
             onChange=${e => setF({ ...f, sinTrabajo: e.target.checked })} /> Sólo sin trabajo generado
         </label>
         <label class="fila mini" style="gap:4px;white-space:nowrap"
-          title='Llamados donde todavía no se completó "Atendido por" (la pregunta "Respuesta" del Excel): nadie marcó que lo vio y decidió qué hacer.'>
+          title='Llamados donde todavía no se completó "Resolución/Comunicación" (la pregunta "Respuesta" del Excel): nadie marcó que lo vio y decidió qué hacer.'>
           <input type="checkbox" style="width:auto" checked=${f.sinAtender}
             onChange=${e => setF({ ...f, sinAtender: e.target.checked })} /> Sólo sin atender
         </label>
@@ -12067,7 +12067,7 @@ function SoporteTecnico() {
         <tbody>
           ${filtradas.map(x => html`<tr key=${x.id} style="cursor:pointer" class=${x.atendido_por ? '' : 'sin-atender'}
               onClick=${() => setAbierto({ id: x.id })}
-              title=${x.atendido_por ? '' : 'Sin atender: todavía no se completó quién atendió este llamado ("Atendido por" / "Respuesta" del Excel).'}>
+              title=${x.atendido_por ? '' : 'Sin atender: todavía no se completó quién atendió este llamado ("Resolución/Comunicación" / "Respuesta" del Excel).'}>
             <td style=${anchoEstiloLl('numero')}><b>${x.n_ll}</b></td>
             <td style=${anchoEstiloLl('fecha_llamada')}>${fecha(x.fecha_llamada)}</td>
             <td style=${anchoEstiloLl('cliente')}>${x.cliente_nombre || html`<span class="mini">sin identificar</span>`}${x.telefono ? ' · ' + x.telefono : ''}</td>
@@ -12201,7 +12201,7 @@ function FichaLlamado({ original, alCerrar, alGuardar, alGenerarTrabajo, alVerTr
           ${!ocultos.includes('tipo_llamado') && html`<${Sel} rot="Tipo de llamado" valor=${b.tipo_llamado} opts=${opciones('tipo_llamado')}
             disabled=${!editable} alCambiar=${v => cambiar('tipo_llamado', v)} />`}
           ${T('registrado_por', 'Registrado por')}
-          ${T('atendido_por', 'Atendido por', 'text', {
+          ${T('atendido_por', 'Resolución/Comunicación', 'text', {
             titulo: 'Quién atendió el llamado ("Respuesta" en el Excel de Microsoft Forms) -- no es lo mismo que "Registrado por", que es otra pregunta del mismo formulario.' })}
           ${T('duracion_comunicacion', 'Duración de la comunicación')}
         </div>
