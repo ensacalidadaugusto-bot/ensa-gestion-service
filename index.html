@@ -53,7 +53,11 @@
   --fila-cobrar:#fdfcf7;   --fila-cobrar-h:#f7f2e3;
   --fila-brillo:#fde68a;
   --sombra:0 1px 3px rgba(16,32,48,.10), 0 6px 20px rgba(16,32,48,.06);
-  --radio:8px; --ancho-barra:200px; --alto-barra-arriba:56px; --espacio-barra-arriba:0px;
+  /* --ancho-barra pasó de 200px a 228px (06/11/2026) al sumarle el ícono
+     y la flechita a cada módulo (ver .tab .tab-icono/.tab-chev más
+     abajo) -- con el ancho viejo, nombres como "Gira / Hoja de ruta" o
+     "Coordinación Entrega de equipos" quedaban cortados con "...". */
+  --radio:8px; --ancho-barra:228px; --alto-barra-arriba:56px; --espacio-barra-arriba:0px;
   /* ---- mate funcional (flat / material) ----
      Colores planos y sin degradé; el relieve se usa sólo donde separa un
      bloque de otro (paneles y ventanas sobre el fondo de la pantalla), no
@@ -197,14 +201,55 @@ a{color:var(--acento)}
 .barra .marca img{height:22px;width:auto;display:block}
 .barra .marca span{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--barra-texto);
   line-height:1.3;white-space:normal}
-.tab{background:transparent;border:0;color:var(--barra-texto);padding:8px 13px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.tab{background:transparent;border:0;color:var(--barra-texto);padding:8px 13px;border-radius:6px;cursor:pointer;
+  white-space:nowrap;display:flex;align-items:center;gap:9px}
 .tab:hover{background:rgba(255,255,255,.12);color:#fff}
 .tab.on{background:var(--papel);color:var(--texto);font-weight:600}
+.tab .tab-icono,.tab .tab-chev{display:none}
+.tab .tab-rot{overflow:hidden;text-overflow:ellipsis}
 /* con la barra a la izquierda, cada módulo es una fila entera (no una
    pastilla al lado de la otra); con la barra arriba, y fuera de la barra
    (la pestaña de "Pedido / Cobranza / Historial" adentro de una ficha,
    por ejemplo), siguen siendo pastillas horizontales, sin cambios. */
-.barra:not(.arriba) .tab{display:block;width:100%;text-align:left}
+.barra:not(.arriba) .tab{width:100%;text-align:left}
+/* Ícono + fila/tarjeta + resaltado sólido del activo, a pedido de
+   Augusto (06/11/2026): le gustó el panel de navegación de una app de
+   Siemens que mandó de ejemplo y pidió tomar esa idea para "la barra de
+   disposición vertical" -- un ícono en una placa al lado de cada
+   nombre, cada módulo como una fila con fondo propio y una flechita a
+   la derecha, y el módulo activo resaltado en un color sólido en vez
+   del fondo blanco con texto oscuro que usábamos. Sólo cambia acá, con
+   la barra a la izquierda -- arriba sigue siendo la franja de pastillas
+   compactas de siempre (ver más abajo .tab .tab-icono, .tab .tab-chev
+   escondidos por default: sólo se muestran en esta orientación),
+   porque en una fila angosta no entrarían tantos módulos con ícono y
+   flechita. El color del activo es --alerta, el mismo ámbar que ya usa
+   la aplicación para las etiquetas de estado -- no es un color nuevo. */
+.barra:not(.arriba) .tab{background:rgba(255,255,255,.045);border-radius:9px;gap:9px;padding:7px 9px}
+.barra:not(.arriba) .tab:hover{background:rgba(255,255,255,.09);color:var(--barra-texto)}
+.barra:not(.arriba) .tab .tab-icono{display:flex;align-items:center;justify-content:center;
+  width:26px;height:26px;border-radius:7px;background:rgba(255,255,255,.07);flex:0 0 auto}
+.barra:not(.arriba) .tab .tab-icono svg{width:15px;height:15px;stroke:var(--barra-texto);fill:none;
+  stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.barra:not(.arriba) .tab .tab-rot{flex:1 1 auto}
+.barra:not(.arriba) .tab .tab-chev{display:block;flex:0 0 auto;color:#4b5760;font-size:14px;line-height:1}
+.barra:not(.arriba) .tab.on{background:var(--alerta);color:var(--negro);font-weight:700}
+.barra:not(.arriba) .tab.on .tab-icono{background:rgba(9,15,19,.2)}
+.barra:not(.arriba) .tab.on .tab-icono svg{stroke:var(--negro)}
+.barra:not(.arriba) .tab.on .tab-chev{color:rgba(9,15,19,.55)}
+/* adentro del recuadro de "Gestión" el fondo propio de cada fila se
+   saca -- ya lo da .grupo-menu -- para no quedar con dos fondos
+   superpuestos; el resaltado del activo (más abajo, más específico)
+   sigue ganando igual si uno de los módulos de adentro es el activo. */
+.grupo-menu .tab{background:transparent}
+.grupo-menu .tab:hover{background:rgba(255,255,255,.09)}
+/* "Módulos": título chico arriba de la lista, como el "Quicklinks" de la
+   referencia -- separa de un vistazo el encabezado (el logo) del resto.
+   Sólo con la barra a la izquierda: arriba ya separa la marca de la
+   lista con estar en los extremos opuestos de la misma fila. */
+.rotulo-lista{display:none}
+.barra:not(.arriba) .rotulo-lista{display:block;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:#5e6b77;font-weight:700;padding:2px 6px 1px;flex:0 0 auto}
 /* "Gestión": un desplegable adentro del menú que agrupa tres módulos que
    antes eran entradas sueltas (Productividad, Tablero, Coordinación
    Entrega de equipos), a pedido de Augusto (05/11/2026) -- ver
@@ -234,6 +279,8 @@ a{color:var(--acento)}
 .barra:not(.arriba) .tab-grupo{width:100%;justify-content:space-between}
 .tab-grupo.on-hijo{background:rgba(255,255,255,.12);font-weight:600}
 .barra:not(.arriba) .tab-hijo{padding-left:30px;font-size:12.5px}
+.barra:not(.arriba) .tab-hijo .tab-icono{width:22px;height:22px}
+.barra:not(.arriba) .tab-hijo .tab-icono svg{width:12px;height:12px}
 .barra.arriba .tab-hijo{font-size:12px;padding:8px 11px}
 .barra .der{margin-top:auto;display:flex;flex-direction:column;align-items:stretch;gap:8px;
   font-size:12px;flex:0 0 auto}
@@ -14377,6 +14424,41 @@ function armarMenu(visibles) {
   return items;
 }
 
+/* Íconos de cada módulo en la barra lateral, a pedido de Augusto
+   (06/11/2026): le gustó el panel de navegación de una app de Siemens
+   (un ícono en una placa al lado de cada nombre, la fila entera como
+   una tarjeta con flechita, y el módulo activo resaltado en un color
+   sólido) y pidió tomar esas ideas para "la barra de disposición
+   vertical". Los dibujos de acá son genéricos, de trazo simple -- no
+   son los íconos de Siemens, sólo se tomó el patrón (ver también
+   style.css, donde está el resaltado y la tarjeta). Sólo se ven con la
+   barra a la izquierda: arriba sigue siendo la franja de pastillas
+   compactas de siempre, sin íconos ni flechita (si no, no entrarían
+   tantos módulos en una sola fila angosta). Cada función arma el svg de
+   nuevo en cada llamada (en vez de guardar el vnode ya armado) porque
+   Preact no lleva bien que el mismo vnode se reuse en más de un lugar
+   del árbol entre un render y otro. */
+const ICONOS_MENU = {
+  trabajos: () => html`<g><path d="M5 3h6a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M6.5 1.5h3v2h-3z"/><path d="M5.5 7.5h5M5.5 10h5M5.5 12.5h3"/></g>`,
+  giras: () => html`<g><path d="M8 15s5-4.4 5-8.3A5 5 0 0 0 3 6.7C3 10.6 8 15 8 15Z"/><circle cx="8" cy="6.7" r="1.8"/></g>`,
+  repuestos: () => html`<path d="M11.4 4.6a3 3 0 0 1-3.8 3.8L3.8 12a1.3 1.3 0 0 0 1.8 1.8l3.6-3.8a3 3 0 0 1 3.8-3.8l-1.9 1.9-1.4-1.4 1.9-1.9Z"/>`,
+  cobranza: () => html`<g><circle cx="8" cy="8" r="6.3"/><path d="M8 4.7v6.6M10.1 6.3a1.9 1.9 0 0 0-2-1.1c-1.1 0-2 .6-2 1.6 0 2.1 4.1 1 4.1 3 0 1-.9 1.6-2 1.6a2.1 2.1 0 0 1-2.1-1.2"/></g>`,
+  encuestas: () => html`<path d="M8 2.3 9.8 6l4 .6-2.9 2.8.7 4-3.6-1.9-3.6 1.9.7-4L2.2 6.6l4-.6Z"/>`,
+  gestion: () => html`<g><rect x="2.2" y="2.2" width="4.8" height="4.8" rx="1"/><rect x="9" y="2.2" width="4.8" height="4.8" rx="1"/><rect x="2.2" y="9" width="4.8" height="4.8" rx="1"/><rect x="9" y="9" width="4.8" height="4.8" rx="1"/></g>`,
+  productividad: () => html`<path d="M3 13.5V9M7 13.5V5.5M11 13.5V7.5M14 3.5l-3 3-2-2-3 3"/>`,
+  tablero: () => html`<g><rect x="2.3" y="3" width="11.4" height="8.4" rx="1.3"/><path d="M6 13.8h4"/></g>`,
+  controles: () => html`<g><path d="M2.5 11.5V5h6v6.5"/><path d="M8.5 7.5h2.8L13.5 10v1.5h-5"/><circle cx="4.7" cy="12.3" r="1.2"/><circle cx="11.3" cy="12.3" r="1.2"/></g>`,
+  ofertar: () => html`<g><path d="M2.5 8.3 7.7 3a1 1 0 0 1 1.4 0l3.9 3.9a1 1 0 0 1 0 1.4L8 13.5 2.5 8.3Z"/><circle cx="9.5" cy="6.3" r=".9"/></g>`,
+  soporte: () => html`<g><path d="M3 8.5v-1a5 5 0 0 1 10 0v1"/><rect x="2.3" y="8" width="2.6" height="3.6" rx="1"/><rect x="11.1" y="8" width="2.6" height="3.6" rx="1"/><path d="M13 11.6v.6a2 2 0 0 1-2 2H9.3"/></g>`,
+  clientes: () => html`<g><ellipse cx="8" cy="3.8" rx="5" ry="1.8"/><path d="M3 3.8v8.4c0 1 2.2 1.8 5 1.8s5-.8 5-1.8V3.8"/><path d="M3 8c0 1 2.2 1.8 5 1.8s5-.8 5-1.8"/></g>`,
+  admin: () => html`<g><path d="M8 1.8 13 4v4c0 3.7-2.3 6.1-5 7.2-2.7-1.1-5-3.5-5-7.2V4Z"/><path d="M5.8 8 7.3 9.5l3-3.2"/></g>`,
+};
+function IconoModulo({ clave }) {
+  const armar = ICONOS_MENU[clave];
+  if (!armar) return null;
+  return html`<span class="tab-icono"><svg viewBox="0 0 16 16">${armar()}</svg></span>`;
+}
+
 /* ---------------------------------------------------------------------
    CAMBIAR LA PROPIA CONTRASEÑA
    Cada uno entra por primera vez con una contraseña provisoria que le
@@ -14473,20 +14555,30 @@ function App() {
           <span>Gestión general<br />posventa</span>
         </div>
       </div>
+      <div class="rotulo-lista">Módulos</div>
       <div class="tabs-caja" ref=${tabsRef}>
         ${armarMenu(visibles).map(item => item.tipo === 'vista'
           ? html`<button class=${'tab ' + (vista[0] === item.clave ? 'on' : '')}
-              onClick=${() => set({ vista: item.clave })}>${item.rotulo}</button>`
+              onClick=${() => set({ vista: item.clave })}>
+              <${IconoModulo} clave=${item.clave} />
+              <span class="tab-rot">${item.rotulo}</span>
+              <span class="tab-chev" aria-hidden="true">›</span>
+            </button>`
           : html`<div class="grupo-menu" key=${item.clave}>
               <button class=${'tab tab-grupo' + (item.hijos.some(h => h.clave === vista[0]) ? ' on-hijo' : '')}
                 title=${gruposAbiertos.has(item.clave) ? `Cerrar ${item.rotulo}` : `Abrir ${item.rotulo}`}
                 onClick=${() => alternarGrupoMenu(item.clave)}>
+                <${IconoModulo} clave="gestion" />
                 <span class="crece">${item.rotulo}</span>
                 <span aria-hidden="true">${gruposAbiertos.has(item.clave) ? '▾' : '▸'}</span>
               </button>
               ${gruposAbiertos.has(item.clave) && item.hijos.map(h => html`<button key=${h.clave}
                 class=${'tab tab-hijo ' + (vista[0] === h.clave ? 'on' : '')}
-                onClick=${() => set({ vista: h.clave })}>${h.rotulo}</button>`)}
+                onClick=${() => set({ vista: h.clave })}>
+                <${IconoModulo} clave=${h.clave} />
+                <span class="tab-rot">${h.rotulo}</span>
+                <span class="tab-chev" aria-hidden="true">›</span>
+              </button>`)}
             </div>`)}
       </div>
       <div class="der">
