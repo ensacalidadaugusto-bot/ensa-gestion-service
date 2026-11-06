@@ -12536,12 +12536,15 @@ function FichaLlamado({ original, alCerrar, alGuardar, alGenerarTrabajo, alVerTr
         ${editable && original && !original.trabajo_id && asignando && html`<div class="rejilla" style="margin-top:8px">
           <${Autocompletar} rot="Elegir el trabajo ya creado" valor=${trabajoElegido} lista=${trabajosCandidatos}
             textoDe=${t => `${t.n_ot || ('#' + t.id)} · ${t.cliente_nombre || 'sin cliente'}`
-              + `${t.n_serie ? ' · ' + t.n_serie : ''}${t.n_llamada ? ' · ya tiene ' + t.n_llamada : ''}`}
+              + `${t.n_serie ? ' · ' + t.n_serie : ''}${t.estado ? ' · ' + t.estado : ''}`
+              + `${t.n_llamada ? ' · ya tiene ' + t.n_llamada : ''}`}
             alElegir=${setTrabajoElegido} placeholder="Buscar por N° OT, cliente o N° de serie…" />
         </div>
-        <p class="mini" style="margin:2px 0 8px">Al asignarlo, este llamado queda enlazado a ese trabajo
-          y, si todavía no tiene su propio N° LL, se le pone <b>${original.n_ll}</b> para mantener la
-          trazabilidad (un trabajo con el N° LL de otro llamado no aparece en la búsqueda).</p>
+        <p class="mini" style="margin:2px 0 8px">Puede ser un trabajo en cualquier estado (programado,
+          cumplido, etc.): se busca por N° OT, cliente o N° de serie, no por su estado. Al asignarlo,
+          este llamado queda enlazado a ese trabajo y, si todavía no tiene su propio N° LL, se le pone
+          <b>${original.n_ll}</b> para mantener la trazabilidad (un trabajo con el N° LL de otro llamado
+          no aparece en la búsqueda).</p>
         <div class="fila" style="gap:8px">
           <button class="btn chico" disabled=${!trabajoElegido || asignGuardando}
             onClick=${() => asignarTrabajoExistente(trabajoElegido)}>
