@@ -13522,11 +13522,11 @@ function MapaInstalaciones({ equipos, clientes, instalacionPorCodigo, alAbrirEqu
             onClick=${buscarPendientes}>
             ${buscando ? `Buscando${progreso ? ` (${progreso.hecho + 1} de ${progreso.total})` : '…'}`
               : `Buscar ubicaciones${pendientes.length ? ` (${pendientes.length})` : ''}`}</button>`}
-          <label class="fila mini" style="gap:6px;align-items:center;cursor:pointer" title="Sacar o dejar puesto el color de estado del equipo en cada punto">
-            <input type="checkbox" data-testid="toggle-estado-mapa" checked=${verEstado}
-              onChange=${e => setVerEstado(e.target.checked)} />
-            Mostrar estado del equipo (color)
-          </label>
+          <button class=${'btn chico ' + (verEstado ? '' : 'sec')} data-testid="toggle-estado-mapa"
+            title="Sacar o dejar puesto el color de estado del equipo en cada punto"
+            onClick=${() => setVerEstado(v => !v)}>
+            ${verEstado ? '✓ ' : ''}Estado del equipo (color)
+          </button>
         </div>
         ${verEstado ? html`<div class="fila mini" style="margin-top:10px;gap:16px;flex-wrap:wrap;align-items:center" data-testid="leyenda-mapa">
           <b>Referencias:</b>
