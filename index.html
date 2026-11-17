@@ -969,6 +969,15 @@ table.calor .celda{display:flex;align-items:center;justify-content:center;min-wi
   border-left:4px solid var(--error);border-radius:0 6px 6px 0;padding:10px 12px;margin-bottom:12px}
 .aviso-cierre .mini{color:var(--et-rojo-t);opacity:.85}
 .vacio{padding:30px;text-align:center;color:var(--suave)}
+/* Número dentro de un punto del Mapa de instalaciones cuando agrupa más
+   de un equipo (a pedido de Augusto, 17/11/2026, cuarta vuelta). Se le
+   saca todo el aspecto de "globito" propio del tooltip de Leaflet: sólo
+   queda el número, centrado, con una sombra para que se lea igual sobre
+   cualquiera de los colores del punto. */
+.leaflet-tooltip.etiqueta-cantidad-mapa{background:transparent;border:none;box-shadow:none;padding:0;margin:0;
+  font-weight:700;font-size:11px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.65),0 0 2px rgba(0,0,0,.5);
+  pointer-events:none}
+.leaflet-tooltip.etiqueta-cantidad-mapa::before{display:none}
 .cargando{padding:20px;text-align:center;color:var(--suave)}
 .aviso-version{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:95;
   display:flex;gap:8px;align-items:center;background:var(--barra);color:#fff;
@@ -11493,6 +11502,12 @@ const ESTADOS_EQUIPO_MAPA = {
   ofertar:  { nombre: 'Para ofertar',   relleno: '#eab308', borde: '#a16207', opacidad: 0.88 },
   garantia: { nombre: 'En garantía',    relleno: '#dc2626', borde: '#991b1b', opacidad: 0.4 },
 };
+/* A pedido de Augusto (17/11/2026, cuarta vuelta): "agregale una opción de
+   sacarle este último filtro de color o dejarlo así" -- con el casillero
+   "Mostrar estado del equipo" apagado, todos los puntos se pintan con
+   este color neutro en vez del de ESTADOS_EQUIPO_MAPA (la precisión de la
+   ubicación -- borde sólido/punteado -- no se ve afectada). */
+const ESTADO_NEUTRO_MAPA = { nombre: '', relleno: '#2563eb', borde: '#1e3a8a', opacidad: 0.85 };
 /** 'garantia' (instalado hace menos de MESES_INSTALACION_MINIMA meses:
     puede seguir en garantía, no se oferta todavía), 'ofertar' (ya pasaron
     más de MESES_SIN_ASISTENCIA meses sin un Service o Service Proactivo
@@ -13321,6 +13336,9 @@ function MapaInstalaciones({ equipos, clientes, instalacionPorCodigo, alAbrirEqu
   const [errorGeo, setErrorGeo] = useState(null);
   const [buscando, setBuscando] = useState(false);
   const [progreso, setProgreso] = useState(null);   // { hecho, total } mientras busca
+  // A pedido de Augusto (17/11/2026, cuarta vuelta): se puede sacar el
+  // color de estado del equipo o dejarlo así (arranca puesto, como vino).
+  const [verEstado, setVerEstado] = useState(true);
   const divMapaRef = useRef(null);
   const mapaRef = useRef(null);
   const capaRef = useRef(null);
@@ -13444,10 +13462,12 @@ function MapaInstalaciones({ equipos, clientes, instalacionPorCodigo, alAbrirEqu
     capa.clearLayers();
     puntos.forEach(p => {
       /* Relleno = estado del equipo (verde/amarillo/rojo transparente,
-         a pedido de Augusto); borde sólido o punteado = precisión de la
-         ubicación (dirección exacta o sólo ciudad) -- lo que antes
-         distinguía esto con un color aparte (naranja hueco). */
-      const col = ESTADOS_EQUIPO_MAPA[p.estado] || ESTADOS_EQUIPO_MAPA.ok;
+         a pedido de Augusto), salvo que el casillero "Mostrar estado del
+         equipo" esté apagado -- ahí todos quedan con el mismo color
+         neutro. Borde sólido o punteado = precisión de la ubicación
+         (dirección exacta o sólo ciudad) -- eso no cambia con el
+         casillero. */
+      const col = verEstado ? (ESTADOS_EQUIPO_MAPA[p.estado] || ESTADOS_EQUIPO_MAPA.ok) : ESTADO_NEUTRO_MAPA;
       const marcador = window.L.circleMarker([p.lat, p.lng], {
         radius: p.nivel === 'direccion' ? 11 : 9,
         color: col.borde, weight: p.nivel === 'direccion' ? 2 : 1.5,
@@ -13458,24 +13478,33 @@ function MapaInstalaciones({ equipos, clientes, instalacionPorCodigo, alAbrirEqu
         ? '<div class="mini">Ubicación aproximada: sólo se identificó la ciudad (borde punteado)</div>' : '';
       const lista = p.items.map(it => {
         const colIt = ESTADOS_EQUIPO_MAPA[it.estado] || ESTADOS_EQUIPO_MAPA.ok;
-        return `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;` +
-          `background:${colIt.relleno};border:1px solid ${colIt.borde};margin-right:5px"></span>` +
-          `${escaparHtmlMapa(it.equipo.n_serie)}` +
+        const puntoColor = verEstado ? `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;` +
+          `background:${colIt.relleno};border:1px solid ${colIt.borde};margin-right:5px"></span>` : '';
+        const etiquetaEstado = verEstado ? ` · <span class="mini">${colIt.nombre}</span>` : '';
+        return `${puntoColor}${escaparHtmlMapa(it.equipo.n_serie)}` +
           ` — ${escaparHtmlMapa((clientesPorId.get(it.equipo.cliente_id) || {}).nombre || 'sin cliente')}` +
-          (it.equipo.modelo ? ` · ${escaparHtmlMapa(it.equipo.modelo)}` : '') +
-          ` · <span class="mini">${colIt.nombre}</span>`;
+          (it.equipo.modelo ? ` · ${escaparHtmlMapa(it.equipo.modelo)}` : '') + etiquetaEstado;
       }).join('<br>');
       const direccionTxt = p.items[0] && p.items[0].direccion;
       marcador.bindPopup(`<b>${escaparHtmlMapa(direccionTxt || p.items[0].ciudad)}</b>`
         + `<div class="mini">${escaparHtmlMapa([p.items[0].ciudad, p.items[0].provincia, p.items[0].pais].filter(Boolean).join(', '))}</div>`
         + titulo + `<div style="margin-top:4px">${lista}</div>`);
+      /* A pedido de Augusto (17/11/2026, cuarta vuelta): "cuando alejo la
+         imagen y me engloba varios equipos en un círculo, ponele un
+         número dentro de cuantos se representan en ese círculo" -- un
+         número fijo, centrado en el punto, nada más que cuando agrupa
+         más de uno (si es sólo uno, el número no agrega nada). */
+      if (p.items.length > 1) {
+        marcador.bindTooltip(String(p.items.length),
+          { permanent: true, direction: 'center', className: 'etiqueta-cantidad-mapa', opacity: 1 });
+      }
       marcador.addTo(capa);
     });
     if (puntos.length) {
       const bounds = window.L.latLngBounds(puntos.map(p => [p.lat, p.lng]));
       mapaRef.current && mapaRef.current.fitBounds(bounds, { padding: [30, 30], maxZoom: 14 });
     }
-  }, [puntos]);
+  }, [puntos, verEstado]);
 
   return html`<div>
     <div class="panel" style="margin-bottom:10px">
@@ -13487,14 +13516,19 @@ function MapaInstalaciones({ equipos, clientes, instalacionPorCodigo, alAbrirEqu
           ['pendientes de buscar', pendientes.length],
           ['sin datos de ubicación', sinDatos],
         ]} />
-        <div class="fila" style="margin-top:8px;gap:10px;align-items:baseline">
+        <div class="fila" style="margin-top:8px;gap:10px;align-items:baseline;flex-wrap:wrap">
           ${errorGeo && html`<div class="aviso error">${errorGeo}</div>`}
           ${!errorGeo && editable && html`<button class="btn chico" disabled=${buscando || !pendientes.length}
             onClick=${buscarPendientes}>
             ${buscando ? `Buscando${progreso ? ` (${progreso.hecho + 1} de ${progreso.total})` : '…'}`
               : `Buscar ubicaciones${pendientes.length ? ` (${pendientes.length})` : ''}`}</button>`}
+          <label class="fila mini" style="gap:6px;align-items:center;cursor:pointer" title="Sacar o dejar puesto el color de estado del equipo en cada punto">
+            <input type="checkbox" data-testid="toggle-estado-mapa" checked=${verEstado}
+              onChange=${e => setVerEstado(e.target.checked)} />
+            Mostrar estado del equipo (color)
+          </label>
         </div>
-        <div class="fila mini" style="margin-top:10px;gap:16px;flex-wrap:wrap;align-items:center" data-testid="leyenda-mapa">
+        ${verEstado ? html`<div class="fila mini" style="margin-top:10px;gap:16px;flex-wrap:wrap;align-items:center" data-testid="leyenda-mapa">
           <b>Referencias:</b>
           ${Object.entries(ESTADOS_EQUIPO_MAPA).map(([clave, col]) => html`<span key=${clave} class="fila"
               style="gap:5px;align-items:center">
@@ -13504,11 +13538,12 @@ function MapaInstalaciones({ equipos, clientes, instalacionPorCodigo, alAbrirEqu
               : clave === 'ofertar' ? `Amarillo — candidato a ofertarle un service (más de ${MESES_SIN_ASISTENCIA} meses sin asistencia)`
               : `Rojo (transparentado) — instalado hace menos de ${MESES_INSTALACION_MINIMA} meses: puede seguir en garantía`}
           </span>`)}
-        </div>
+        </div>` : html`<div class="mini" style="margin-top:10px" data-testid="leyenda-mapa">
+          Color de estado del equipo apagado: todos los puntos quedan con el mismo color. El borde sólido o
+          punteado sigue mostrando la precisión de la ubicación.</div>`}
         <div class="mini" style="margin-top:4px">El borde sólido marca dirección exacta; el borde punteado,
-          sólo a nivel ciudad (no se pudo ubicar la calle). Un punto con más de un equipo se pinta con el de mayor
-          prioridad (para ofertar &gt; en garantía &gt; OK); el globo de cada punto lista el estado propio de cada
-          uno. Ubicaciones de <a href="https://www.openstreetmap.org" target="_blank" rel="noopener">OpenStreetMap</a>.</div>
+          sólo a nivel ciudad (no se pudo ubicar la calle). ${verEstado ? 'Un punto con más de un equipo se pinta con el de mayor prioridad (para ofertar &gt; en garantía &gt; OK); el globo de cada punto lista el estado propio de cada uno. ' : ''}Un punto con más de un equipo lleva, además, un número en el medio indicando cuántos representa.
+          Ubicaciones de <a href="https://www.openstreetmap.org" target="_blank" rel="noopener">OpenStreetMap</a>.</div>
       </div>
     </div>
     <div class="panel">
