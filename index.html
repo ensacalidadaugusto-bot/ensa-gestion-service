@@ -11464,6 +11464,57 @@ const TIPOS_ASISTENCIA = ['Service', 'Service Proactivo'];
    último Service haya sido hace más de MESES_SIN_ASISTENCIA. */
 const MESES_INSTALACION_MINIMA = 11;
 
+/** Última fecha de un Service o Service Proactivo CUMPLIDO de cada
+    equipo: la comparten "Elevadores a ofertar" y el color de cada punto
+    del Mapa de instalaciones (Base de datos), para que los dos usen
+    exactamente el mismo criterio de "hace cuánto que no se lo asiste". */
+function ultimaAsistenciaPorEquipo(trabajos) {
+  const m = new Map();
+  (trabajos || []).forEach(t => {
+    if (t.estado !== 'CUMPLIDO' || !t.equipo_id || !t.fecha_visita) return;
+    if (!TIPOS_ASISTENCIA.includes(t.tipo_pedido)) return;
+    const actual = m.get(t.equipo_id);
+    if (!actual || t.fecha_visita > actual) m.set(t.equipo_id, t.fecha_visita);
+  });
+  return m;
+}
+
+/* A pedido de Augusto (17/11/2026, tercera vuelta): en el Mapa de
+   instalaciones, "que cada indicador me muestre el estado del equipo...
+   verde si esta OK, amarillo si... coinciden las condiciones de
+   elevadores para ofertar y rojo transparentado si esta en garantía".
+   Son, literalmente, los mismos dos criterios de arriba (MESES_SIN_
+   ASISTENCIA / MESES_INSTALACION_MINIMA) que ya separan a un equipo
+   candidato en "Elevadores a ofertar" de uno que puede seguir en
+   garantía -- acá sólo se parten en tres estados con nombre, para poder
+   pintar un punto del mapa con cada uno. */
+const ESTADOS_EQUIPO_MAPA = {
+  ok:       { nombre: 'OK',             relleno: '#16a34a', borde: '#166534', opacidad: 0.88 },
+  ofertar:  { nombre: 'Para ofertar',   relleno: '#eab308', borde: '#a16207', opacidad: 0.88 },
+  garantia: { nombre: 'En garantía',    relleno: '#dc2626', borde: '#991b1b', opacidad: 0.4 },
+};
+/** 'garantia' (instalado hace menos de MESES_INSTALACION_MINIMA meses:
+    puede seguir en garantía, no se oferta todavía), 'ofertar' (ya pasaron
+    más de MESES_SIN_ASISTENCIA meses sin un Service o Service Proactivo
+    cumplido) u 'ok' (ninguna de las dos). */
+function estadoOfertaEquipo(eq, ultimaPorEquipo) {
+  const mesesInstalado = eq.fecha_instalacion ? mesesDesde(eq.fecha_instalacion) : null;
+  if (mesesInstalado !== null && mesesInstalado < MESES_INSTALACION_MINIMA) return 'garantia';
+  const ultima = (ultimaPorEquipo && ultimaPorEquipo.get(eq.id)) || null;
+  const referencia = ultima || eq.fecha_instalacion || null;
+  const meses = referencia ? mesesDesde(referencia) : null;
+  if (meses !== null && meses > MESES_SIN_ASISTENCIA) return 'ofertar';
+  return 'ok';
+}
+/* Cuando un punto del mapa junta a más de un equipo (misma dirección o
+   misma ciudad) y no todos están en el mismo estado, se pinta con el de
+   mayor prioridad -- "para ofertar" es lo más accionable, así que no
+   conviene que quede tapado por uno en garantía u OK que esté al lado. */
+const PRIORIDAD_ESTADO_MAPA = ['ofertar', 'garantia', 'ok'];
+function estadoPrioritarioDe(items) {
+  return PRIORIDAD_ESTADO_MAPA.find(e => items.some(it => it.estado === e)) || 'ok';
+}
+
 function ElevadoresAOfertar() {
   const s = useS();
   const [busca, setBusca] = useState('');
@@ -13265,6 +13316,7 @@ function escaparHtmlMapa(s) {
 }
 
 function MapaInstalaciones({ equipos, clientes, instalacionPorCodigo, alAbrirEquipo }) {
+  const s = useS();
   const [geo, setGeo] = useState([]);
   const [errorGeo, setErrorGeo] = useState(null);
   const [buscando, setBuscando] = useState(false);
@@ -13285,9 +13337,15 @@ function MapaInstalaciones({ equipos, clientes, instalacionPorCodigo, alAbrirEqu
   useEffect(() => { cargarGeo(); }, []);
 
   const clientesPorId = useMemo(() => new Map(clientes.map(c => [c.id, c])), [clientes]);
+  /* A pedido de Augusto (17/11/2026, tercera vuelta): cada equipo lleva su
+     estado (mismo criterio que "Elevadores a ofertar") para poder pintar
+     el punto -- ultimaAsistenciaPorEquipo()/estadoOfertaEquipo(), un poco
+     más abajo en este archivo, junto a esa pantalla. */
+  const ultimaPorEquipo = useMemo(() => ultimaAsistenciaPorEquipo(s.trabajos), [s.trabajos]);
   const equiposConUbicacion = useMemo(() => equipos
-    .map(e => datosUbicacionEquipo(e, clientesPorId.get(e.cliente_id), instalacionPorCodigo)),
-    [equipos, clientesPorId, instalacionPorCodigo]);
+    .map(e => ({ ...datosUbicacionEquipo(e, clientesPorId.get(e.cliente_id), instalacionPorCodigo),
+      estado: estadoOfertaEquipo(e, ultimaPorEquipo) })),
+    [equipos, clientesPorId, instalacionPorCodigo, ultimaPorEquipo]);
   const geoPorConsulta = useMemo(() => new Map(geo.map(g => [g.consulta, g])), [geo]);
 
   const puntos = useMemo(() => {
@@ -13299,7 +13357,7 @@ function MapaInstalaciones({ equipos, clientes, instalacionPorCodigo, alAbrirEqu
       if (!m.has(k)) m.set(k, { ...p, items: [] });
       m.get(k).items.push(it);
     });
-    return [...m.values()];
+    return [...m.values()].map(p => ({ ...p, estado: estadoPrioritarioDe(p.items) }));
   }, [equiposConUbicacion, geoPorConsulta]);
 
   const pendientes = useMemo(() => {
@@ -13385,14 +13443,28 @@ function MapaInstalaciones({ equipos, clientes, instalacionPorCodigo, alAbrirEqu
     if (!capa || !window.L) return;
     capa.clearLayers();
     puntos.forEach(p => {
-      const marcador = p.nivel === 'direccion'
-        ? window.L.marker([p.lat, p.lng])
-        : window.L.circleMarker([p.lat, p.lng], { radius: 10, color: '#b45309', fillColor: '#f59e0b', fillOpacity: 0.85, weight: 2 });
+      /* Relleno = estado del equipo (verde/amarillo/rojo transparente,
+         a pedido de Augusto); borde sólido o punteado = precisión de la
+         ubicación (dirección exacta o sólo ciudad) -- lo que antes
+         distinguía esto con un color aparte (naranja hueco). */
+      const col = ESTADOS_EQUIPO_MAPA[p.estado] || ESTADOS_EQUIPO_MAPA.ok;
+      const marcador = window.L.circleMarker([p.lat, p.lng], {
+        radius: p.nivel === 'direccion' ? 11 : 9,
+        color: col.borde, weight: p.nivel === 'direccion' ? 2 : 1.5,
+        dashArray: p.nivel === 'direccion' ? null : '3,3',
+        fillColor: col.relleno, fillOpacity: col.opacidad,
+      });
       const titulo = p.nivel === 'ciudad'
-        ? '<div class="mini" style="color:#b45309">Ubicación aproximada: sólo se identificó la ciudad</div>' : '';
-      const lista = p.items.map(it => `${escaparHtmlMapa(it.equipo.n_serie)}`
-        + ` — ${escaparHtmlMapa((clientesPorId.get(it.equipo.cliente_id) || {}).nombre || 'sin cliente')}`
-        + (it.equipo.modelo ? ` · ${escaparHtmlMapa(it.equipo.modelo)}` : '')).join('<br>');
+        ? '<div class="mini">Ubicación aproximada: sólo se identificó la ciudad (borde punteado)</div>' : '';
+      const lista = p.items.map(it => {
+        const colIt = ESTADOS_EQUIPO_MAPA[it.estado] || ESTADOS_EQUIPO_MAPA.ok;
+        return `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;` +
+          `background:${colIt.relleno};border:1px solid ${colIt.borde};margin-right:5px"></span>` +
+          `${escaparHtmlMapa(it.equipo.n_serie)}` +
+          ` — ${escaparHtmlMapa((clientesPorId.get(it.equipo.cliente_id) || {}).nombre || 'sin cliente')}` +
+          (it.equipo.modelo ? ` · ${escaparHtmlMapa(it.equipo.modelo)}` : '') +
+          ` · <span class="mini">${colIt.nombre}</span>`;
+      }).join('<br>');
       const direccionTxt = p.items[0] && p.items[0].direccion;
       marcador.bindPopup(`<b>${escaparHtmlMapa(direccionTxt || p.items[0].ciudad)}</b>`
         + `<div class="mini">${escaparHtmlMapa([p.items[0].ciudad, p.items[0].provincia, p.items[0].pais].filter(Boolean).join(', '))}</div>`
@@ -13421,10 +13493,22 @@ function MapaInstalaciones({ equipos, clientes, instalacionPorCodigo, alAbrirEqu
             onClick=${buscarPendientes}>
             ${buscando ? `Buscando${progreso ? ` (${progreso.hecho + 1} de ${progreso.total})` : '…'}`
               : `Buscar ubicaciones${pendientes.length ? ` (${pendientes.length})` : ''}`}</button>`}
-          <span class="mini">Los puntos llenos son dirección exacta; los puntos huecos (naranja) son
-            sólo a nivel ciudad, porque no se pudo ubicar la calle. Ubicaciones de
-            <a href="https://www.openstreetmap.org" target="_blank" rel="noopener">OpenStreetMap</a>.</span>
         </div>
+        <div class="fila mini" style="margin-top:10px;gap:16px;flex-wrap:wrap;align-items:center" data-testid="leyenda-mapa">
+          <b>Referencias:</b>
+          ${Object.entries(ESTADOS_EQUIPO_MAPA).map(([clave, col]) => html`<span key=${clave} class="fila"
+              style="gap:5px;align-items:center">
+            <span style=${`display:inline-block;width:13px;height:13px;border-radius:50%;background:${col.relleno};
+              opacity:${col.opacidad};border:1px solid ${col.borde}`}></span>
+            ${clave === 'ok' ? 'Verde — equipo al día'
+              : clave === 'ofertar' ? `Amarillo — candidato a ofertarle un service (más de ${MESES_SIN_ASISTENCIA} meses sin asistencia)`
+              : `Rojo (transparentado) — instalado hace menos de ${MESES_INSTALACION_MINIMA} meses: puede seguir en garantía`}
+          </span>`)}
+        </div>
+        <div class="mini" style="margin-top:4px">El borde sólido marca dirección exacta; el borde punteado,
+          sólo a nivel ciudad (no se pudo ubicar la calle). Un punto con más de un equipo se pinta con el de mayor
+          prioridad (para ofertar &gt; en garantía &gt; OK); el globo de cada punto lista el estado propio de cada
+          uno. Ubicaciones de <a href="https://www.openstreetmap.org" target="_blank" rel="noopener">OpenStreetMap</a>.</div>
       </div>
     </div>
     <div class="panel">
