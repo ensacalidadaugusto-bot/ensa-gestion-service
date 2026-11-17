@@ -11,6 +11,13 @@
      no molestan: el navegador simplemente no encuentra el manifiesto. -->
 <link rel="manifest" href="manifest.webmanifest" />
 <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<!-- Leaflet (mapa de instalaciones, Base de datos): se carga desde su CDN porque
+     el mapa en sí ya necesita internet (las imágenes del mapa y la búsqueda de
+     direcciones vienen de servicios externos), así que no suma ninguna
+     dependencia nueva de conexión; no se incluye entre las librerías de abajo
+     para no inflar el archivo con algo que, a diferencia de ellas, no hace
+     falta cuando no se abre el mapa. -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -1344,6 +1351,7 @@ div.campo>span{display:block;font-size:11px;color:var(--suave);margin-bottom:3px
 </head>
 <body>
 <div id="raiz"><div style="padding:40px;text-align:center;color:#67727f;font:14px system-ui">Cargando…</div></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 /* === Librerías: Preact, Preact Hooks, htm y Supabase JS (incluidas para que la app
    funcione sin depender de internet más allá de la propia base de datos) === */
@@ -12957,6 +12965,289 @@ function ImportarLlamados({ alCerrar, alImportar, datosExistentes }) {
    mismas acciones (editar dirección, cargar observaciones, abrir la
    ficha): es nomás una cuestión de cómo se acomodan en la pantalla.
    ===================================================================== */
+
+/* ---------------------------------------------------------------------
+   MAPA DE INSTALACIONES (dentro de Base de datos)
+   A pedido de Augusto (17/11/2026): "en base de datos tenes datos ciudad,
+   provincia y pais de instalación + la dirección. necesito que me hagas
+   un mapa que me identifique con puntos donde hay un elevador instalado.
+   en caso de que no identifiques donde es la calle, marcame solo la
+   ciudad". Confirmó que quiere esto como un agregado DENTRO de la propia
+   pantalla "Base de datos" (no un módulo aparte), y que la columna país
+   (que todavía no existía en "equipos") la agregue yo -- con Argentina
+   como valor por defecto para lo ya cargado (sql/62_pais_y_mapa.sql).
+
+   Ubicar una dirección en un mapa (geocodificar) es un servicio externo:
+   se usa Nominatim (el buscador de OpenStreetMap), que es gratuito y no
+   pide ninguna clave, a cambio de pedir no más de una consulta por
+   segundo. Para no golpearlo de nuevo con la misma dirección cada vez que
+   alguien abre el mapa, cada resultado (encontrado o no) se guarda en una
+   tabla nueva, "geocodificacion", que funciona como caché: la pantalla
+   sólo sale a buscar las direcciones que todavía no estén ahí.
+
+   Para cada equipo se intenta primero con la dirección completa
+   (dirección + ciudad + provincia + país); si no se encuentra nada así
+   (por ejemplo, una dirección mal escrita, incompleta, o un campo vacío),
+   se cae a buscar sólo ciudad + provincia + país -- el pedido explícito
+   de Augusto para ese caso. Los dos niveles se guardan por separado en la
+   caché, así que una dirección que ya se sabe que no se puede ubicar no
+   se vuelve a intentar en cada carga: sólo se reintenta si Augusto toca
+   "Buscar ubicaciones" de nuevo.
+   --------------------------------------------------------------------- */
+const PAIS_A_ISO = {
+  argentina: 'ar', ecuador: 'ec', uruguay: 'uy', paraguay: 'py', bolivia: 'bo',
+  chile: 'cl', peru: 'pe', colombia: 'co', venezuela: 've', brasil: 'br',
+  mexico: 'mx', panama: 'pa', 'costa rica': 'cr', 'republica dominicana': 'do',
+  guatemala: 'gt', honduras: 'hn', 'el salvador': 'sv', nicaragua: 'ni',
+};
+function isoDePais(pais) {
+  return PAIS_A_ISO[sinAcentos(pais || '').trim()] || null;
+}
+/** Texto normalizado (sin acentos, en minúscula, sin espacios de más) que
+    sirve a la vez de clave de caché y de consulta para Nominatim -- así
+    "Córdoba" y "CORDOBA" comparten la misma fila de caché. */
+function claveGeo(partes) {
+  return sinAcentos(partes.filter(Boolean).join(', ')).replace(/\s+/g, ' ').trim() || null;
+}
+/** Un solo intento de geocodificación contra Nominatim. Devuelve
+    {lat, lng} o null si no encontró nada; tira si hubo un problema de red
+    (para que el llamador decida si reintentar más tarde, sin guardar un
+    "no encontrado" que en realidad fue un corte de conexión). */
+async function geocodificarConsulta(consulta, pais) {
+  const iso = isoDePais(pais);
+  const params = new URLSearchParams({ format: 'jsonv2', q: consulta, limit: '1' });
+  if (iso) params.set('countrycodes', iso);
+  const resp = await fetch(`https://nominatim.openstreetmap.org/search?${params}`);
+  if (!resp.ok) throw new Error('No se pudo buscar la ubicación (HTTP ' + resp.status + ')');
+  const datos = await resp.json();
+  return datos && datos[0] ? { lat: Number(datos[0].lat), lng: Number(datos[0].lon) } : null;
+}
+/** Para un equipo puntual: dirección/ciudad/provincia/país resueltos (con
+    el cliente como resguardo si el equipo no tiene su propio dato -- igual
+    criterio que ciudadDe()/provinciaDe()/direccionDe() para trabajos), y
+    las dos claves de búsqueda (completa y sólo-ciudad). pais no tiene
+    resguardo en el cliente (esa tabla no tiene esa columna): si el equipo
+    no la tiene cargada, se asume Argentina, el país de prácticamente todo
+    lo cargado hasta ahora. */
+function datosUbicacionEquipo(e, cli, instalacionPorCodigo) {
+  const inst = instalacionPorCodigo && instalacionPorCodigo.get(normCodigo(e.n_serie));
+  const direccion = (e.direccion || (inst && inst.direccion_instalacion) || '').trim();
+  const ciudad = (e.ciudad || (cli && cli.ciudad) || '').trim();
+  const provincia = (e.provincia || (cli && cli.provincia) || '').trim();
+  const pais = (e.pais || 'Argentina').trim();
+  return {
+    equipo: e, direccion, ciudad, provincia, pais,
+    claveCompleta: direccion && ciudad ? claveGeo([direccion, ciudad, provincia, pais]) : null,
+    claveCiudad: ciudad ? claveGeo([ciudad, provincia, pais]) : null,
+  };
+}
+/** Punto ya resuelto (de la caché) para un equipo, preferido por dirección
+    exacta y cayendo a sólo-ciudad; null si todavía no hay nada guardado
+    que sirva (ni completa ni ciudad encontradas). */
+function puntoDeEquipo(it, geoPorConsulta) {
+  if (it.claveCompleta) {
+    const c = geoPorConsulta.get(it.claveCompleta);
+    if (c && c.encontrado) return { lat: Number(c.lat), lng: Number(c.lng), nivel: 'direccion' };
+  }
+  if (it.claveCiudad) {
+    const c = geoPorConsulta.get(it.claveCiudad);
+    if (c && c.encontrado) return { lat: Number(c.lat), lng: Number(c.lng), nivel: 'ciudad' };
+  }
+  return null;
+}
+/** La próxima consulta que haría falta pedirle a Nominatim para este
+    equipo (o null si ya está resuelto, o si no hay ni dirección ni ciudad
+    cargadas): primero la dirección completa; si esa ya se intentó y no
+    dio resultado, la ciudad. */
+function proximaConsultaDe(it, geoPorConsulta) {
+  if (it.claveCompleta) {
+    const c = geoPorConsulta.get(it.claveCompleta);
+    if (!c) return { consulta: it.claveCompleta, nivel: 'direccion', pais: it.pais };
+    if (c.encontrado) return null;
+  }
+  if (it.claveCiudad) {
+    const c = geoPorConsulta.get(it.claveCiudad);
+    if (!c) return { consulta: it.claveCiudad, nivel: 'ciudad', pais: it.pais };
+    if (c.encontrado) return null;
+  }
+  return null;
+}
+function escaparHtmlMapa(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+function MapaInstalaciones({ equipos, clientes, instalacionPorCodigo, alAbrirEquipo }) {
+  const [geo, setGeo] = useState([]);
+  const [errorGeo, setErrorGeo] = useState(null);
+  const [buscando, setBuscando] = useState(false);
+  const [progreso, setProgreso] = useState(null);   // { hecho, total } mientras busca
+  const divMapaRef = useRef(null);
+  const mapaRef = useRef(null);
+  const capaRef = useRef(null);
+  const editable = puedeMaestros();
+
+  const cargarGeo = useCallback(async () => {
+    try { setGeo(await traerTodo('geocodificacion', { campo: 'id', asc: true })); setErrorGeo(null); }
+    catch (e) {
+      setGeo([]);
+      setErrorGeo(/relation|does not exist|no existe|schema cache/i.test(e.message || '')
+        ? 'Falta correr en Supabase el script 62_pais_y_mapa.sql.' : (e.message || String(e)));
+    }
+  }, []);
+  useEffect(() => { cargarGeo(); }, []);
+
+  const clientesPorId = useMemo(() => new Map(clientes.map(c => [c.id, c])), [clientes]);
+  const equiposConUbicacion = useMemo(() => equipos
+    .map(e => datosUbicacionEquipo(e, clientesPorId.get(e.cliente_id), instalacionPorCodigo)),
+    [equipos, clientesPorId, instalacionPorCodigo]);
+  const geoPorConsulta = useMemo(() => new Map(geo.map(g => [g.consulta, g])), [geo]);
+
+  const puntos = useMemo(() => {
+    const m = new Map();
+    equiposConUbicacion.forEach(it => {
+      const p = puntoDeEquipo(it, geoPorConsulta);
+      if (!p) return;
+      const k = `${p.lat.toFixed(5)},${p.lng.toFixed(5)},${p.nivel}`;
+      if (!m.has(k)) m.set(k, { ...p, items: [] });
+      m.get(k).items.push(it);
+    });
+    return [...m.values()];
+  }, [equiposConUbicacion, geoPorConsulta]);
+
+  const pendientes = useMemo(() => {
+    const vistos = new Set();
+    const lista = [];
+    equiposConUbicacion.forEach(it => {
+      const c = proximaConsultaDe(it, geoPorConsulta);
+      if (!c || vistos.has(c.consulta)) return;
+      vistos.add(c.consulta);
+      lista.push(c);
+    });
+    return lista;
+  }, [equiposConUbicacion, geoPorConsulta]);
+
+  const sinDatos = useMemo(() => equiposConUbicacion
+    .filter(it => !it.claveCompleta && !it.claveCiudad).length, [equiposConUbicacion]);
+  const conDireccionExacta = useMemo(() => equiposConUbicacion
+    .filter(it => (puntoDeEquipo(it, geoPorConsulta) || {}).nivel === 'direccion').length,
+    [equiposConUbicacion, geoPorConsulta]);
+  const conSoloCiudad = useMemo(() => equiposConUbicacion
+    .filter(it => (puntoDeEquipo(it, geoPorConsulta) || {}).nivel === 'ciudad').length,
+    [equiposConUbicacion, geoPorConsulta]);
+
+  /** Recorre las consultas pendientes una por una (como pide Nominatim: no
+      más de una por segundo), guardando cada resultado en Supabase a
+      medida que llega -- así, si se cierra la pantalla a mitad de camino,
+      lo ya buscado no se pierde. Después de terminar la primera tanda,
+      vuelve a calcular qué falta: una dirección que recién se marcó "no
+      encontrada" pasa a intentarse por ciudad en la misma pasada, sin
+      tener que tocar el botón de nuevo. Un error de red puntual en un
+      ítem no se guarda (para poder reintentarlo después) y no frena el
+      resto de la búsqueda. */
+  async function buscarPendientes() {
+    if (buscando) return;
+    setBuscando(true);
+    try {
+      let geoLocal = geo;
+      for (let vuelta = 0; vuelta < 6; vuelta++) {
+        const geoPorConsultaLocal = new Map(geoLocal.map(g => [g.consulta, g]));
+        const vistos = new Set();
+        const cola = [];
+        equiposConUbicacion.forEach(it => {
+          const c = proximaConsultaDe(it, geoPorConsultaLocal);
+          if (!c || vistos.has(c.consulta)) return;
+          vistos.add(c.consulta);
+          cola.push(c);
+        });
+        if (!cola.length) break;
+        for (let i = 0; i < cola.length; i++) {
+          setProgreso({ hecho: i, total: cola.length });
+          const item = cola[i];
+          let r;
+          try { r = await geocodificarConsulta(item.consulta, item.pais); }
+          catch (e) { await new Promise(res => setTimeout(res, 1100)); continue; }
+          const fila = { consulta: item.consulta, nivel: item.nivel, encontrado: !!r,
+            lat: r ? r.lat : null, lng: r ? r.lng : null };
+          const { data, error } = await cliente().from('geocodificacion')
+            .upsert(fila, { onConflict: 'consulta' }).select().single();
+          if (!error && data) {
+            geoLocal = [...geoLocal.filter(g => g.consulta !== data.consulta), data];
+            setGeo(geoLocal);
+          }
+          await new Promise(res => setTimeout(res, 1100));
+        }
+      }
+    } finally { setBuscando(false); setProgreso(null); }
+  }
+
+  // El mapa en sí se crea una sola vez; los marcadores se redibujan cuando cambian los puntos.
+  useEffect(() => {
+    if (!divMapaRef.current || !window.L) return;
+    const m = window.L.map(divMapaRef.current, { center: [-20, -63], zoom: 4 });
+    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19,
+    }).addTo(m);
+    capaRef.current = window.L.layerGroup().addTo(m);
+    mapaRef.current = m;
+    return () => { m.remove(); mapaRef.current = null; capaRef.current = null; };
+  }, []);
+
+  useEffect(() => {
+    const capa = capaRef.current;
+    if (!capa || !window.L) return;
+    capa.clearLayers();
+    puntos.forEach(p => {
+      const marcador = p.nivel === 'direccion'
+        ? window.L.marker([p.lat, p.lng])
+        : window.L.circleMarker([p.lat, p.lng], { radius: 10, color: '#b45309', fillColor: '#f59e0b', fillOpacity: 0.85, weight: 2 });
+      const titulo = p.nivel === 'ciudad'
+        ? '<div class="mini" style="color:#b45309">Ubicación aproximada: sólo se identificó la ciudad</div>' : '';
+      const lista = p.items.map(it => `${escaparHtmlMapa(it.equipo.n_serie)}`
+        + ` — ${escaparHtmlMapa((clientesPorId.get(it.equipo.cliente_id) || {}).nombre || 'sin cliente')}`
+        + (it.equipo.modelo ? ` · ${escaparHtmlMapa(it.equipo.modelo)}` : '')).join('<br>');
+      const direccionTxt = p.items[0] && p.items[0].direccion;
+      marcador.bindPopup(`<b>${escaparHtmlMapa(direccionTxt || p.items[0].ciudad)}</b>`
+        + `<div class="mini">${escaparHtmlMapa([p.items[0].ciudad, p.items[0].provincia, p.items[0].pais].filter(Boolean).join(', '))}</div>`
+        + titulo + `<div style="margin-top:4px">${lista}</div>`);
+      marcador.addTo(capa);
+    });
+    if (puntos.length) {
+      const bounds = window.L.latLngBounds(puntos.map(p => [p.lat, p.lng]));
+      mapaRef.current && mapaRef.current.fitBounds(bounds, { padding: [30, 30], maxZoom: 14 });
+    }
+  }, [puntos]);
+
+  return html`<div>
+    <div class="panel" style="margin-bottom:10px">
+      <div class="panel-cuerpo" style="padding:10px 12px">
+        <${Resumen} items=${[
+          ['equipos', equiposConUbicacion.length],
+          ['con dirección exacta', conDireccionExacta],
+          ['sólo con ciudad', conSoloCiudad],
+          ['pendientes de buscar', pendientes.length],
+          ['sin datos de ubicación', sinDatos],
+        ]} />
+        <div class="fila" style="margin-top:8px;gap:10px;align-items:baseline">
+          ${errorGeo && html`<div class="aviso error">${errorGeo}</div>`}
+          ${!errorGeo && editable && html`<button class="btn chico" disabled=${buscando || !pendientes.length}
+            onClick=${buscarPendientes}>
+            ${buscando ? `Buscando${progreso ? ` (${progreso.hecho + 1} de ${progreso.total})` : '…'}`
+              : `Buscar ubicaciones${pendientes.length ? ` (${pendientes.length})` : ''}`}</button>`}
+          <span class="mini">Los puntos llenos son dirección exacta; los puntos huecos (naranja) son
+            sólo a nivel ciudad, porque no se pudo ubicar la calle. Ubicaciones de
+            <a href="https://www.openstreetmap.org" target="_blank" rel="noopener">OpenStreetMap</a>.</span>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div ref=${divMapaRef} style="height:600px;width:100%" data-testid="mapa-instalaciones"></div>
+      ${!window.L && html`<div class="vacio">No se pudo cargar el mapa (sin conexión a Leaflet).</div>`}
+    </div>
+  </div>`;
+}
+
 function BaseDeDatos() {
   const s = useS();
   const caja = useRef(null);            // la caja que se desplaza de costado
@@ -13231,7 +13522,8 @@ function BaseDeDatos() {
         </div>
         <div class="fila" style="gap:4px">
           ${[['clientes', `Por cliente (${clientes.length})`],
-             ['equipos', `Por equipo (${equipos.length + nuevosFiltrados.length})`]]
+             ['equipos', `Por equipo (${equipos.length + nuevosFiltrados.length})`],
+             ['mapa', 'Mapa de instalaciones']]
             .map(([k, r]) => html`<button class=${'btn chico ' + (modo === k ? '' : 'sec')}
               onClick=${() => setModo(k)}>${r}</button>`)}
         </div>
@@ -13249,10 +13541,10 @@ function BaseDeDatos() {
             Vincular ${huerfanos.length} equipos sin cliente</button>`}
           ${esAdmin() && html`<button class="btn sec chico" onClick=${() => setVerDup(true)}>
             Buscar duplicados</button>`}
-          <button class="btn sec chico" onClick=${() => modo === 'clientes'
-            ? bajarCSV('clientes', colsCli, clientes) : bajarCSV('equipos', colsEq, equipos)}>Exportar</button>
-          ${editable && html`<button class="btn sec chico" onClick=${() => setEditEq({ nuevo: true })}>+ Equipo</button>`}
-          ${editable && html`<button class="btn chico" onClick=${() => setEditCli({ nuevo: true })}>+ Cliente</button>`}
+          ${modo !== 'mapa' && html`<button class="btn sec chico" onClick=${() => modo === 'clientes'
+            ? bajarCSV('clientes', colsCli, clientes) : bajarCSV('equipos', colsEq, equipos)}>Exportar</button>`}
+          ${modo !== 'mapa' && editable && html`<button class="btn sec chico" onClick=${() => setEditEq({ nuevo: true })}>+ Equipo</button>`}
+          ${modo !== 'mapa' && editable && html`<button class="btn chico" onClick=${() => setEditCli({ nuevo: true })}>+ Cliente</button>`}
           ${modo === 'equipos' && puedeAlta && html`<button class="btn sec chico"
             onClick=${() => setImportando(true)}>Importar instalaciones</button>`}
           ${modo === 'equipos' && puedeAlta && html`<button class="btn chico" disabled=${!candidatosAlta.length}
@@ -13271,7 +13563,9 @@ function BaseDeDatos() {
       </div>
     </div>
 
-    ${modo === 'clientes' ? html`
+    ${modo === 'mapa' ? html`<${MapaInstalaciones} equipos=${s.equipos} clientes=${s.clientes}
+      instalacionPorCodigo=${instalacionPorCodigo} alAbrirEquipo=${setEditEq} />`
+    : modo === 'clientes' ? html`
       <div class="tabla-caja panel" ref=${caja}>
         <table class="grilla">
           <thead><tr>
@@ -13715,7 +14009,12 @@ async function cargarSoloTrabajosDelCliente(clienteId) {
    --------------------------------------------------------------------- */
 function EditarEquipo({ e, alCerrar, alAbrirTrabajo }) {
   const s = useS();
-  const [b, setB] = useState({ ...e });
+  /* "pais" es nuevo (17/11/2026, a pedido de Augusto, para el mapa de
+     instalaciones): por default "Argentina" en un equipo nuevo, que es el
+     país de prácticamente todo lo cargado hasta ahora; uno ya guardado
+     conserva el suyo (sql/62_pais_y_mapa.sql ya completó "Argentina" en
+     los que no lo tenían). */
+  const [b, setB] = useState({ pais: 'Argentina', ...e });
   const [verHistorial, setVerHistorial] = useState(false);
   const editable = puedeMaestros();
   const set2 = (k, v) => setB(x => ({ ...x, [k]: v }));
@@ -13739,7 +14038,7 @@ function EditarEquipo({ e, alCerrar, alAbrirTrabajo }) {
     const cuerpo = { n_serie: (b.n_serie || '').toUpperCase().trim(), modelo: b.modelo, n_paradas: b.n_paradas,
       motorizacion: b.motorizacion, puerta: b.puerta, fecha_instalacion: b.fecha_instalacion,
       cliente_id: b.cliente_id, ciudad: b.ciudad, provincia: b.provincia, direccion: b.direccion,
-      observaciones: b.observaciones };
+      pais: b.pais, observaciones: b.observaciones };
     if (b.nuevo) {
       const { data, error } = await db.from('equipos').insert(cuerpo).select('*').single();
       if (error) return toast('No se pudo crear: ' + error.message, 'error');
@@ -13772,6 +14071,8 @@ function EditarEquipo({ e, alCerrar, alAbrirTrabajo }) {
       <${Txt} rot="Ciudad de instalación" valor=${b.ciudad} alCambiar=${v => set2('ciudad', v)} disabled=${!editable} />
       <${Sel} rot="Provincia de instalación" valor=${b.provincia} opts=${opciones('provincia')}
         alCambiar=${v => set2('provincia', v)} disabled=${!editable} />
+      <${Sel} rot="País de instalación" valor=${b.pais} opts=${opciones('pais')}
+        alCambiar=${v => set2('pais', v)} disabled=${!editable} />
     </div>
     <${Txt} rot="Dirección de instalación" valor=${b.direccion} alCambiar=${v => set2('direccion', v)} disabled=${!editable} />
     <${Txt} rot="Observaciones del equipo" area=${2} valor=${b.observaciones}
