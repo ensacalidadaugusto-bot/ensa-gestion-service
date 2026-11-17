@@ -5950,6 +5950,20 @@ const OPCIONES_GESTION_CLIENTE = ['CONFIRMAR TRABAJOS', 'COORDINAR HORARIO', 'RE
 /* La única opción que deja la parada "resuelta" (sin remarcar) */
 const GESTION_CLIENTE_RESUELTA = 'CONFIRMAR TRABAJOS';
 
+/** Vehículo/código de viaje/viáticos de UN técnico en UNA gira puntual:
+    su propia fila en gira_tecnicos si ya se guardó, o si no, lo que tenía
+    la gira (antes de este cambio) cuando ese técnico es el Técnico 1 --
+    así los datos ya cargados no se ven vacíos mientras no se corrió
+    sql/61_gira_tecnicos.sql ni se guardó nada nuevo todavía. Comparten
+    esto Giras(), HojaRuta() y PlanificacionRRHH(). */
+function datosTecnicoGira(gira, giraTecnicos, tecnicoId) {
+  const fila = (giraTecnicos || []).find(gt => gt.gira_id === gira.id && gt.tecnico_id === tecnicoId);
+  if (fila) return fila;
+  if (gira.tecnico_id === tecnicoId) return { vehiculo: gira.vehiculo, codigo_viaje: gira.codigo_viaje,
+    viaticos: gira.viaticos, viaticos_entregados: gira.viaticos_entregados };
+  return { vehiculo: null, codigo_viaje: null, viaticos: null, viaticos_entregados: false };
+}
+
 function Giras() {
   const s = useS();
   const [giraId, setGiraId] = useState(() => (s.giras[0] && s.giras[0].id) || null);
@@ -5964,6 +5978,7 @@ function Giras() {
      entero aunque la fila esté dentro de una caja con scroll o con las
      esquinas redondeadas recortadas (overflow:hidden), como .dia. */
   const [menuGestion, setMenuGestion] = useState(null);
+  const [tecnicoParaAgregar, setTecnicoParaAgregar] = useState('');
   const editable = puedeGiras();
   /* A pedido de Augusto (16/11/2026): "en la misma semana puedo tener dos
      semanas individuales, con codigos de viaje distintos y tecnicos a
@@ -5983,6 +5998,28 @@ function Giras() {
       + (g.vehiculo ? ` · ${g.vehiculo}` : '')
       + (g.codigo_viaje ? ` · viaje ${g.codigo_viaje}` : '');
   };
+  /* A pedido de Augusto (17/11/2026): "QUE una semana pueda dividirse o
+     filtrarse por técnicos y que por cada técnico me permita agregarle un
+     codigo de viaje, vehiculo y efetivo entregado" -- confirmó que puede
+     haber más de dos técnicos en una misma semana ("a veces son mas de
+     dos técnicos en una misma semana, a veces salen 2 y 1 y demás"), así
+     que estos tres datos pasan a guardarse UNO POR TÉCNICO, en la tabla
+     nueva "gira_tecnicos" (sql/61_gira_tecnicos.sql), en vez de un solo
+     juego compartido por toda la gira como hasta ahora. Se carga acá
+     mismo, no en cargarDatos() de arriba, para que si todavía no se corrió
+     ese script en Supabase no se caiga el resto de la aplicación -- mismo
+     criterio que ya se usa para "llamados_soporte" en SoporteTecnico(). */
+  const [giraTecnicos, setGiraTecnicos] = useState([]);
+  const [errorGiraTecnicos, setErrorGiraTecnicos] = useState(null);
+  const cargarGiraTecnicos = useCallback(async () => {
+    try { setGiraTecnicos(await traerTodo('gira_tecnicos', { campo: 'id', asc: true })); setErrorGiraTecnicos(null); }
+    catch (e) {
+      setGiraTecnicos([]);
+      setErrorGiraTecnicos(/relation|does not exist|no existe|schema cache/i.test(e.message || '')
+        ? 'Falta correr en Supabase el script 61_gira_tecnicos.sql.' : (e.message || String(e)));
+    }
+  }, []);
+  useEffect(() => { cargarGiraTecnicos(); }, []);
   const gira = s.giras.find(g => g.id === giraId);
   const paradas = useMemo(() => s.trabajos.filter(t => t.gira_id === giraId)
     .sort((a, b) => String(a.fecha_visita || '9').localeCompare(String(b.fecha_visita || '9'))
@@ -6002,6 +6039,67 @@ function Giras() {
     const { error } = await cliente().from('giras').update(campos).eq('id', giraId);
     if (error) return toast('No se pudo guardar la gira: ' + error.message, 'error');
     set({ giras: S.giras.map(g => g.id === giraId ? { ...g, ...campos } : g) });
+  }
+
+  /** Técnicos de ESTA gira para el panel de vehículo/código/viáticos: unión
+      de los dos técnicos "oficiales" (tecnico_id/tecnico2_id), los que
+      tengan algún trabajo cargado con ese técnico (tecnico_ids, igual que
+      en la Hoja de ruta más abajo) y los que ya tengan su propia fila
+      guardada en gira_tecnicos -- así no se "pierde" a nadie, sea cual sea
+      la forma en que haya quedado vinculado a la semana. */
+  const tecnicosDeLaGira = useMemo(() => {
+    if (!gira) return [];
+    const ids = new Set();
+    if (gira.tecnico_id) ids.add(String(gira.tecnico_id));
+    if (gira.tecnico2_id) ids.add(String(gira.tecnico2_id));
+    paradas.forEach(t => (t.tecnico_ids || []).forEach(id => ids.add(String(id))));
+    giraTecnicos.filter(gt => gt.gira_id === giraId).forEach(gt => ids.add(String(gt.tecnico_id)));
+    return [...ids].map(id => s.tecnicos.find(t => String(t.id) === id)).filter(Boolean)
+      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  }, [gira, paradas, giraTecnicos, giraId, s.tecnicos]);
+
+  // Técnicos activos que todavía no están en la lista de arriba, para "+ Agregar técnico"
+  const tecnicosParaAgregar = useMemo(() => s.tecnicos.filter(t => t.activo
+    && !tecnicosDeLaGira.some(x => x.id === t.id)), [s.tecnicos, tecnicosDeLaGira]);
+
+  /** Vehículo/código de viaje/viáticos de un técnico puntual en ESTA gira:
+      su propia fila si ya la guardó, o si no, lo que tenía la gira antes
+      de este cambio cuando ese técnico es el Técnico 1 -- así no se ve
+      vacío mientras no se corrió sql/61_gira_tecnicos.sql ni se guardó
+      nada nuevo todavía. */
+  function datosDeTecnico(tecnicoId) {
+    return gira ? datosTecnicoGira(gira, giraTecnicos, tecnicoId)
+      : { vehiculo: null, codigo_viaje: null, viaticos: null, viaticos_entregados: false };
+  }
+
+  async function guardarDatosTecnico(tecnicoId, campos) {
+    const previo = datosDeTecnico(tecnicoId);
+    const cuerpo = { gira_id: giraId, tecnico_id: tecnicoId,
+      vehiculo: previo.vehiculo || null, codigo_viaje: previo.codigo_viaje || null,
+      viaticos: previo.viaticos ?? null, viaticos_entregados: !!previo.viaticos_entregados, ...campos };
+    try {
+      const { data, error } = await cliente().from('gira_tecnicos')
+        .upsert(cuerpo, { onConflict: 'gira_id,tecnico_id' }).select().single();
+      if (error) throw error;
+      setGiraTecnicos(prev => [...prev.filter(gt => !(gt.gira_id === giraId && gt.tecnico_id === tecnicoId)), data]);
+    } catch (e) {
+      toast('No se pudo guardar: ' + (/relation|does not exist|no existe|schema cache/i.test(e.message || '')
+        ? 'Falta correr en Supabase el script 61_gira_tecnicos.sql.' : e.message), 'error');
+    }
+  }
+
+  /** Quita los datos guardados de un técnico en este panel. Si ese técnico
+      sigue teniendo trabajos cargados en esta gira, o es el Técnico 1/2
+      oficial, vuelve a aparecer en la lista -- esto sólo borra el dato
+      (vehículo/código/viáticos), no lo desvincula de la semana. */
+  async function quitarDatosTecnico(tecnicoId) {
+    const fila = giraTecnicos.find(gt => gt.gira_id === giraId && gt.tecnico_id === tecnicoId);
+    if (!fila) return;
+    try {
+      const { error } = await cliente().from('gira_tecnicos').delete().eq('id', fila.id);
+      if (error) throw error;
+      setGiraTecnicos(prev => prev.filter(gt => gt.id !== fila.id));
+    } catch (e) { toast('No se pudo quitar: ' + e.message, 'error'); }
   }
 
   /** Días de la semana de la gira, para elegir cuándo se visita */
@@ -6137,29 +6235,51 @@ function Giras() {
               ${s.tecnicos.filter(t => t.activo).map(t => html`<option value=${t.id}>${t.nombre}</option>`)}
             </select>
           <//>
-          <${Sel} rot="Vehículo" valor=${gira.vehiculo} opts=${opciones('vehiculo')} disabled=${!editable}
-            alCambiar=${v => actualizarGira({ vehiculo: v })} />
-          <${Txt} rot="Código de viaje" valor=${gira.codigo_viaje} disabled=${!editable}
-            alCambiar=${v => actualizarGira({ codigo_viaje: v })} />
-          <${Txt} rot="Efectivo entregado al técnico ($)" tipo="number" valor=${gira.viaticos}
-            disabled=${!esAdmin()}
-            alCambiar=${v => actualizarGira({ viaticos: v, viaticos_entregados: Number(v) > 0 })} />
         </div>
         <div class="mini" style="margin-top:2px">
           El número de semana se calcula solo a partir de la fecha "Desde";
           ${esAdmin() ? 'como administrador podés corregirlo a mano cuando haga falta.'
             : 'sólo el administrador puede corregirlo a mano.'}
         </div>
-        <div class="fila mini" style="margin-top:2px">
-          <label class="fila" style="gap:6px;${esAdmin() ? 'cursor:pointer' : ''}">
-            <input type="checkbox" style="width:auto" disabled=${!esAdmin()}
-              checked=${!!gira.viaticos_entregados}
-              onChange=${e => actualizarGira({ viaticos_entregados: e.target.checked })} />
-            Viáticos entregados
-          </label>
-          <span>${gira.viaticos ? `${plata(gira.viaticos)} en efectivo` : 'Sin viáticos cargados'}
-            ${esAdmin() ? '' : ' — sólo el administrador puede modificarlo'}</span>
+
+        <div style="margin-top:14px">
+          <b class="mini">Vehículo, código de viaje y efectivo entregado, por técnico</b>
+          ${errorGiraTecnicos && html`<div class="aviso error" style="margin-top:4px">${errorGiraTecnicos}</div>`}
+          ${!errorGiraTecnicos && !tecnicosDeLaGira.length && html`<div class="vacio" style="padding:6px 0">
+            Todavía no hay ningún técnico asignado a esta semana.</div>`}
+          ${!errorGiraTecnicos && tecnicosDeLaGira.map(t => { const d = datosDeTecnico(t.id); return html`
+            <div key=${t.id} class="rejilla dos"
+              style="border-top:1px solid var(--borde);padding-top:8px;margin-top:8px">
+              <div class="fila" style="grid-column:1 / -1;justify-content:space-between;align-items:baseline">
+                <b>${t.nombre}</b>
+                ${editable && html`<button class="btn sec chico" title="Quitar estos datos de este técnico"
+                  onClick=${() => quitarDatosTecnico(t.id)}>✕</button>`}
+              </div>
+              <${Sel} rot="Vehículo" valor=${d.vehiculo} opts=${opciones('vehiculo')} disabled=${!editable}
+                alCambiar=${v => guardarDatosTecnico(t.id, { vehiculo: v })} />
+              <${Txt} rot="Código de viaje" valor=${d.codigo_viaje} disabled=${!editable}
+                alCambiar=${v => guardarDatosTecnico(t.id, { codigo_viaje: v })} />
+              <${Txt} rot="Efectivo entregado ($)" tipo="number" valor=${d.viaticos} disabled=${!esAdmin()}
+                alCambiar=${v => guardarDatosTecnico(t.id, { viaticos: v, viaticos_entregados: Number(v) > 0 })} />
+              <label class="fila mini" style="gap:6px;${esAdmin() ? 'cursor:pointer' : ''}">
+                <input type="checkbox" style="width:auto" disabled=${!esAdmin()}
+                  checked=${!!d.viaticos_entregados}
+                  onChange=${e => guardarDatosTecnico(t.id, { viaticos_entregados: e.target.checked })} />
+                Viáticos entregados${d.viaticos ? ` — ${plata(d.viaticos)} en efectivo` : ''}
+              </label>
+            </div>`; })}
+          ${editable && html`<div class="fila" style="gap:6px;margin-top:10px">
+            <select style="max-width:260px" value=${tecnicoParaAgregar}
+              onChange=${e => setTecnicoParaAgregar(e.target.value)}>
+              <option value="">— elegir técnico —</option>
+              ${tecnicosParaAgregar.map(t => html`<option value=${t.id}>${t.nombre}</option>`)}
+            </select>
+            <button class="btn sec chico" disabled=${!tecnicoParaAgregar}
+              onClick=${() => { guardarDatosTecnico(Number(tecnicoParaAgregar), {}); setTecnicoParaAgregar(''); }}>
+              + Agregar técnico</button>
+          </div>`}
         </div>
+
         <${Resumen} items=${[
           ['paradas', paradas.length],
           ['días', dias.length],
@@ -6262,8 +6382,10 @@ function Giras() {
       </div>
     <//>`}
 
-    ${imprimir && gira && html`<${HojaRuta} gira=${gira} paradas=${paradas} alCerrar=${() => setImprimir(false)} />`}
-    ${verRRHH && gira && html`<${PlanificacionRRHH} gira=${gira} paradas=${paradas} alCerrar=${() => setVerRRHH(false)} />`}
+    ${imprimir && gira && html`<${HojaRuta} gira=${gira} paradas=${paradas} giraTecnicos=${giraTecnicos}
+      alCerrar=${() => setImprimir(false)} />`}
+    ${verRRHH && gira && html`<${PlanificacionRRHH} gira=${gira} paradas=${paradas} giraTecnicos=${giraTecnicos}
+      alCerrar=${() => setVerRRHH(false)} />`}
     ${nueva && html`<${NuevaGira} alCerrar=${id => { setNueva(false); if (id) setGiraId(id); }} />`}
     ${fichaId && html`<${Ficha} id=${fichaId} alCerrar=${() => setFichaId(null)} />`}
   </div>`;
@@ -6460,7 +6582,7 @@ function tamañoRecomendado(paradas, columnas = COLS_HOJA) {
   return 9;
 }
 
-function HojaRuta({ gira, paradas, alCerrar }) {
+function HojaRuta({ gira, paradas, giraTecnicos, alCerrar }) {
   const s = useS();
   const [corte, setCorte] = useState('');   // '' | dia | tecnico
   const tec = s.tecnicos.find(t => t.id === gira.tecnico_id);
@@ -6583,10 +6705,28 @@ function HojaRuta({ gira, paradas, alCerrar }) {
      pantalla) muestra sólo ESE técnico -- no tiene sentido que la hoja de
      uno incluya también el nombre de los demás. */
   const tecUnico = tecFiltro ? tecnicosEnGira.find(t => String(t.id) === tecFiltro) : null;
-  const bloqueTecnico = tecFiltro
-    ? html`<div><b>Técnico:</b> ${tecUnico ? tecUnico.nombre : '—'}</div>`
-    : html`<${Fragment}><div><b>Técnico${tec2 ? ' 1' : ''}:</b> ${tec ? tec.nombre : '—'}</div>
-        ${tec2 && html`<div><b>Técnico 2:</b> ${tec2.nombre}</div>`}<//>`;
+  /* Vehículo, código de viaje y efectivo entregado pasaron a guardarse por
+     técnico (a pedido de Augusto, 17/11/2026), ya no un solo juego
+     compartido por toda la gira: la lista de técnicos a mostrar en el
+     encabezado es la de arriba (tecnicosEnGira, la que surge de quién
+     tiene cargado cada trabajo) cuando hay alguna; si todavía no hay
+     ningún trabajo con técnico cargado, se cae a los dos técnicos
+     "oficiales" de la gira (tecnico_id/tecnico2_id), para no perder el
+     dato en giras viejas sin ese detalle por trabajo. */
+  const listaTecnicosEncabezado = tecUnico ? [tecUnico]
+    : tecnicosEnGira.length ? tecnicosEnGira : [tec, tec2].filter(Boolean);
+  const bloqueTecnico = listaTecnicosEncabezado.length
+    ? listaTecnicosEncabezado.map(t => {
+        const d = datosTecnicoGira(gira, giraTecnicos, t.id);
+        return html`<div key=${t.id} style="margin-bottom:4px">
+          <div><b>Técnico:</b> ${t.nombre}</div>
+          <div><b>Vehículo:</b> ${d.vehiculo || '—'}</div>
+          <div><b>Código de viaje:</b> ${d.codigo_viaje || '—'}</div>
+          <div><b>Viáticos entregados:</b> ${plata(d.viaticos) || '—'}</div>
+        </div>`;
+      })
+    : html`<div><b>Técnico:</b> —</div><div><b>Vehículo:</b> —</div>
+        <div><b>Código de viaje:</b> —</div><div><b>Viáticos entregados:</b> —</div>`;
 
   const filaTitulo = html`<tr class="fila-titulo-planilla">
     <th colspan=${COLS_HOJA.length}>
@@ -6599,9 +6739,6 @@ function HojaRuta({ gira, paradas, alCerrar }) {
         </div>
         <div class="mini der">
           ${bloqueTecnico}
-          <div><b>Vehículo:</b> ${gira.vehiculo || '—'}</div>
-          <div><b>Código de viaje:</b> ${gira.codigo_viaje || '—'}</div>
-          <div><b>Viáticos entregados:</b> ${plata(gira.viaticos) || '—'}</div>
         </div>
       </div>
     </th>
@@ -6646,9 +6783,6 @@ function HojaRuta({ gira, paradas, alCerrar }) {
           </div>
           <div class="mini der">
             ${bloqueTecnico}
-            <div><b>Vehículo:</b> ${gira.vehiculo || '—'}</div>
-            <div><b>Código de viaje:</b> ${gira.codigo_viaje || '—'}</div>
-            <div><b>Viáticos entregados:</b> ${plata(gira.viaticos) || '—'}</div>
           </div>
         </div>
         <div class="mini no-imprimir" style="margin:-6px 0 10px">En la hoja impresa este
@@ -6735,8 +6869,10 @@ const COLS_RRHH_HOJA = [
   ['Técnico',       t => t.tecnicos,              110, 0],
 ];
 
-function PlanificacionRRHH({ gira, paradas, alCerrar }) {
+function PlanificacionRRHH({ gira, paradas, giraTecnicos, alCerrar }) {
   const s = useS();
+  const tec = s.tecnicos.find(t => t.id === gira.tecnico_id);
+  const tec2 = s.tecnicos.find(t => t.id === gira.tecnico2_id);
   /* Mismos filtros que la Planilla de trabajos (HojaRuta), a pedido de
      Augusto: "mismos filtros agregar a la impresión que surje de
      'planificación'". Técnicos para el filtro: se calculan a partir de
@@ -6768,6 +6904,25 @@ function PlanificacionRRHH({ gira, paradas, alCerrar }) {
     ? paradasDelTecnico.filter(t => (t.fecha_visita || 'Sin fecha') === diaFiltro)
     : paradasDelTecnico, [paradasDelTecnico, diaFiltro]);
   const subtituloDia = diaFiltro ? etiquetasDias[diaFiltro] : null;
+  /* Mismo criterio que en HojaRuta(): vehículo/código de viaje/efectivo
+     entregado se guardan por técnico (a pedido de Augusto, 17/11/2026);
+     se muestra uno por cada técnico de la lista de arriba (o los dos
+     "oficiales" de la gira si ninguna parada tiene todavía un técnico
+     cargado). */
+  const listaTecnicosEncabezado = tecUnico ? [tecUnico]
+    : tecnicosEnGira.length ? tecnicosEnGira : [tec, tec2].filter(Boolean);
+  const bloqueTecnico = listaTecnicosEncabezado.length
+    ? listaTecnicosEncabezado.map(t => {
+        const d = datosTecnicoGira(gira, giraTecnicos, t.id);
+        return html`<div key=${t.id} style="margin-bottom:4px">
+          <div><b>Técnico:</b> ${t.nombre}</div>
+          <div><b>Vehículo:</b> ${d.vehiculo || '—'}</div>
+          <div><b>Código de viaje:</b> ${d.codigo_viaje || '—'}</div>
+          <div style="font-size:15px"><b>Viáticos entregados:</b> ${plata(d.viaticos) || '—'}</div>
+        </div>`;
+      })
+    : html`<div><b>Técnico:</b> —</div><div><b>Vehículo:</b> —</div>
+        <div><b>Código de viaje:</b> —</div><div><b>Viáticos entregados:</b> —</div>`;
 
   const recomendado = useMemo(() => tamañoRecomendado(paradasFiltradas, COLS_RRHH_HOJA), [paradasFiltradas]);
   const [tam, setTam] = useState(recomendado);
@@ -6792,9 +6947,7 @@ function PlanificacionRRHH({ gira, paradas, alCerrar }) {
           ${subtituloDia && html`<div class="mini"><b>Día: ${subtituloDia}</b></div>`}
         </div>
         <div class="mini der">
-          ${tecUnico && html`<div><b>Técnico:</b> ${tecUnico.nombre}</div>`}
-          <div><b>Vehículo:</b> ${gira.vehiculo || '—'}</div>
-          <div style="font-size:15px"><b>Viáticos entregados:</b> ${plata(gira.viaticos) || '—'}</div>
+          ${bloqueTecnico}
         </div>
       </div>
     </th>
@@ -6838,9 +6991,7 @@ function PlanificacionRRHH({ gira, paradas, alCerrar }) {
             ${subtituloDia && html`<div class="mini"><b>Día: ${subtituloDia}</b></div>`}
           </div>
           <div class="mini der">
-            ${tecUnico && html`<div><b>Técnico:</b> ${tecUnico.nombre}</div>`}
-            <div><b>Vehículo:</b> ${gira.vehiculo || '—'}</div>
-            <div style="font-size:15px"><b>Viáticos entregados:</b> ${plata(gira.viaticos) || '—'}</div>
+            ${bloqueTecnico}
           </div>
         </div>
         <div class="mini no-imprimir" style="margin:-6px 0 10px">En la hoja impresa este
