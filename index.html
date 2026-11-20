@@ -13720,6 +13720,35 @@ function BaseDeDatos() {
     set({ equipos: S.equipos.map(x => x.id === e.id ? { ...x, direccion: valor } : x) });
   }
 
+  /** Vendedor e instaladores: a pedido de Augusto (20/11/2026) -- "no me
+      deja cargar observaciones ni vendedor ni instaladores" en un equipo
+      recién cargado --, dejaron de ser de sólo lectura (antes sólo
+      llegaban del archivo de instalaciones que se importa) y se editan
+      acá mismo, igual que la dirección. Viven en la misma fila de
+      `instalaciones` que las observaciones (campo cualquiera: 'vendedor',
+      'instaladores', etc.). Para un candidato todavía sin dar de alta,
+      `inst` ES esa fila (viene de la tabla tal cual). */
+  async function guardarCampoInstalacion(inst, campo, valor) {
+    const r = await actualizarYComprobar('instalaciones', inst.id, { [campo]: valor });
+    if (!r.ok) return toast(r.msg, 'error');
+    set({ instalaciones: S.instalaciones.map(x => x.id === inst.id ? { ...x, [campo]: valor } : x) });
+  }
+
+  /** Ídem, para un equipo YA dado de alta (e.inst, puede ser null): un
+      equipo cargado antes de este agregado, o uno al que por algún motivo
+      no se le creó su fila de instalaciones al darlo de alta, todavía no
+      tiene dónde vivir ese dato -- se crea ahora, con el código del
+      equipo, en vez de dejarlo sin poder cargar. A partir de acá ese
+      equipo ya tiene instalación propia: también se habilita "Cargar
+      observaciones". */
+  async function guardarCampoInstalacionEquipo(e, campo, valor) {
+    if (e.inst) return guardarCampoInstalacion(e.inst, campo, valor);
+    const { data, error } = await cliente().from('instalaciones')
+      .insert({ codigo: e.n_serie, [campo]: valor }).select('*').single();
+    if (error) return toast('No se pudo guardar: ' + error.message, 'error');
+    set({ instalaciones: [...S.instalaciones, data] });
+  }
+
   /** Da de alta, de una, todos los equipos nuevos detectados (y el
       cliente de cada uno, si hace falta) -- sin cargar ningún trabajo. */
   async function darDeAltaTodos() {
@@ -13957,8 +13986,18 @@ function BaseDeDatos() {
                         onGuardar=${v => guardarDireccionEquipo(e, v)} />`
                     : html`<span title=${dir}>${dir || '—'}</span>`}
                 </span>`;
-                case 'vendedor': return html`<span class="teq-val" data-rot=${col.titulo}>${(i && i.vendedor) || '—'}</span>`;
-                case 'instaladores': return html`<span class="teq-val" data-rot=${col.titulo}>${(i && i.instaladores) || '—'}</span>`;
+                case 'vendedor': return html`<span class="teq-val" data-rot=${col.titulo} onClick=${ev => puedeAlta && ev.stopPropagation()}>
+                  ${puedeAlta
+                    ? html`<${CampoGrilla} valor=${(i && i.vendedor) || ''} titulo="Vendedor" placeholder="Sin cargar…"
+                        onGuardar=${v => guardarCampoInstalacionEquipo(e, 'vendedor', v)} />`
+                    : html`<span title=${(i && i.vendedor) || ''}>${(i && i.vendedor) || '—'}</span>`}
+                </span>`;
+                case 'instaladores': return html`<span class="teq-val" data-rot=${col.titulo} onClick=${ev => puedeAlta && ev.stopPropagation()}>
+                  ${puedeAlta
+                    ? html`<${CampoGrilla} valor=${(i && i.instaladores) || ''} titulo="Instaladores" placeholder="Sin cargar…"
+                        onGuardar=${v => guardarCampoInstalacionEquipo(e, 'instaladores', v)} />`
+                    : html`<span title=${(i && i.instaladores) || ''}>${(i && i.instaladores) || '—'}</span>`}
+                </span>`;
                 case 'instalacion': return html`<span class="teq-val" data-rot=${col.titulo}>
                   ${e.fecha_instalacion ? fecha(e.fecha_instalacion, 1) : '—'}</span>`;
                 case 'ultima': return html`<span class="teq-val" data-rot=${col.titulo}>
@@ -13999,8 +14038,18 @@ function BaseDeDatos() {
                         onGuardar=${v => guardarDireccion(c, v)} />`
                     : html`<span title=${c.direccion_instalacion}>${c.direccion_instalacion || '—'}</span>`}
                 </span>`;
-                case 'vendedor': return html`<span class="teq-val" data-rot=${col.titulo}>${c.vendedor || '—'}</span>`;
-                case 'instaladores': return html`<span class="teq-val" data-rot=${col.titulo}>${c.instaladores || '—'}</span>`;
+                case 'vendedor': return html`<span class="teq-val" data-rot=${col.titulo} onClick=${ev => puedeAlta && ev.stopPropagation()}>
+                  ${puedeAlta
+                    ? html`<${CampoGrilla} valor=${c.vendedor} titulo="Vendedor" placeholder="Sin cargar…"
+                        onGuardar=${v => guardarCampoInstalacion(c, 'vendedor', v)} />`
+                    : html`<span title=${c.vendedor}>${c.vendedor || '—'}</span>`}
+                </span>`;
+                case 'instaladores': return html`<span class="teq-val" data-rot=${col.titulo} onClick=${ev => puedeAlta && ev.stopPropagation()}>
+                  ${puedeAlta
+                    ? html`<${CampoGrilla} valor=${c.instaladores} titulo="Instaladores" placeholder="Sin cargar…"
+                        onGuardar=${v => guardarCampoInstalacion(c, 'instaladores', v)} />`
+                    : html`<span title=${c.instaladores}>${c.instaladores || '—'}</span>`}
+                </span>`;
                 case 'instalacion': return html`<span class="teq-val" data-rot=${col.titulo}>
                   ${c.fecha_instalacion ? fecha(c.fecha_instalacion, 1) : '—'}</span>`;
                 case 'ultima': return html`<span class="teq-val" data-rot=${col.titulo}>—</span>`;
@@ -14051,8 +14100,18 @@ function BaseDeDatos() {
                       : html`<span title=${dir}>${dir}</span>`;
                   })()}
                 </td>
-                <td>${(i && i.vendedor) || ''}</td>
-                <td title=${i && i.instaladores}>${(i && i.instaladores) || ''}</td>
+                <td onClick=${ev => puedeAlta && ev.stopPropagation()}>
+                  ${puedeAlta
+                    ? html`<${CampoGrilla} valor=${(i && i.vendedor) || ''} ancho=${110} titulo="Vendedor" placeholder="Sin cargar…"
+                        onGuardar=${v => guardarCampoInstalacionEquipo(e, 'vendedor', v)} />`
+                    : html`<span title=${(i && i.vendedor) || ''}>${(i && i.vendedor) || ''}</span>`}
+                </td>
+                <td onClick=${ev => puedeAlta && ev.stopPropagation()}>
+                  ${puedeAlta
+                    ? html`<${CampoGrilla} valor=${(i && i.instaladores) || ''} ancho=${140} titulo="Instaladores" placeholder="Sin cargar…"
+                        onGuardar=${v => guardarCampoInstalacionEquipo(e, 'instaladores', v)} />`
+                    : html`<span title=${(i && i.instaladores) || ''}>${(i && i.instaladores) || ''}</span>`}
+                </td>
                 <td>${(i && (puedeAlta || obs)) ? html`<button class="btn sec chico"
                   onClick=${ev => { ev.stopPropagation(); setVerObs(i); }}>${obs ? 'Ver' : 'Cargar'}</button>` : ''}</td>
                 ${puedeComercial && html`<td class="num">${r.n || 0}</td>`}
@@ -14078,8 +14137,18 @@ function BaseDeDatos() {
                       onGuardar=${v => guardarDireccion(c, v)} />`
                   : html`<span title=${c.direccion_instalacion}>${c.direccion_instalacion || ''}</span>`}
               </td>
-              <td>${c.vendedor || ''}</td>
-              <td title=${c.instaladores}>${c.instaladores || ''}</td>
+              <td onClick=${ev => puedeAlta && ev.stopPropagation()}>
+                ${puedeAlta
+                  ? html`<${CampoGrilla} valor=${c.vendedor} ancho=${110} titulo="Vendedor" placeholder="Sin cargar…"
+                      onGuardar=${v => guardarCampoInstalacion(c, 'vendedor', v)} />`
+                  : html`<span title=${c.vendedor}>${c.vendedor || ''}</span>`}
+              </td>
+              <td onClick=${ev => puedeAlta && ev.stopPropagation()}>
+                ${puedeAlta
+                  ? html`<${CampoGrilla} valor=${c.instaladores} ancho=${140} titulo="Instaladores" placeholder="Sin cargar…"
+                      onGuardar=${v => guardarCampoInstalacion(c, 'instaladores', v)} />`
+                  : html`<span title=${c.instaladores}>${c.instaladores || ''}</span>`}
+              </td>
               <td>${(() => {
                 const obsC = c.obs_instalaciones || c.obs_comercial || c.obs_produccion;
                 return (puedeAlta || obsC)
@@ -14348,6 +14417,25 @@ function EditarEquipo({ e, alCerrar, alAbrirTrabajo }) {
       const { data, error } = await db.from('equipos').insert(cuerpo).select('*').single();
       if (error) return toast('No se pudo crear: ' + error.message, 'error');
       set({ equipos: [...S.equipos, data].sort((x, y) => x.n_serie.localeCompare(y.n_serie, 'es')) });
+      /* A pedido de Augusto (20/11/2026): "cuando cargo un equipo nuevo...
+         no me deja cargar observaciones ni vendedor ni instaladores". Esos
+         tres datos viven en la tabla instalaciones, cruzada por código
+         (ver instalacionPorCodigo, más abajo en este archivo) -- un
+         equipo dado de alta por "Dar de alta equipos nuevos" ya tiene esa
+         fila (es de donde salió), pero uno cargado a mano con "+ Equipo"
+         no tenía ninguna, y se quedaba sin poder cargar esos tres datos.
+         Se crea acá, de una, con lo que ya se cargó en esta ficha; si por
+         algún motivo no se pudiera, no se frena el alta del equipo (ya
+         quedó guardado) -- queda para la próxima vez que se edite alguno
+         de esos campos (guardarCampoInstalacionEquipo la crea ahí, si
+         hiciera falta). */
+      const { data: inst, error: errorInst } = await db.from('instalaciones').insert({
+        codigo: cuerpo.n_serie, nombre_cliente: cli ? cli.nombre : null, modelo: cuerpo.modelo,
+        niveles: cuerpo.n_paradas, motorizacion: cuerpo.motorizacion, fecha_instalacion: cuerpo.fecha_instalacion,
+        ubicacion: [cuerpo.ciudad, cuerpo.provincia].filter(Boolean).join(', ') || null,
+        direccion_instalacion: cuerpo.direccion || null,
+      }).select('*').single();
+      if (!errorInst && inst) set({ instalaciones: [...S.instalaciones, inst] });
     } else {
       const { error } = await db.from('equipos').update(cuerpo).eq('id', b.id);
       if (error) return toast('No se pudo guardar: ' + error.message, 'error');
